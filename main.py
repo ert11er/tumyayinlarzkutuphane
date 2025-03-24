@@ -8,77 +8,124 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 import io
 import webbrowser
-import pyperclip  # Import pyperclip for clipboard functionality
+import pyperclip
 
 class AppDownloader:
     def __init__(self, master):
         self.master = master
-        master.title("E-Kitap App Downloader")
-
+        master.title("TÜM Yayınları Z-Kütüphane")
+        
+        # Configure the window
+        master.configure(bg='#1E1E1E')  # Dark background
+        master.state('zoomed')  # Make window maximized
+        
         self.data_file = "data.csv"
         self.download_folder = os.path.join(os.path.dirname(__file__), "data")
         self.data = []
         self.selected_app = None
-        self.category_filter = tk.StringVar(value="All")  # Default to showing all categories
-
+        self.category_filter = tk.StringVar(value="All")
+        
+        # Configure style
+        self.style = ttk.Style()
+        self.style.configure("Red.TButton", 
+                           background="#FF4136", 
+                           foreground="white",
+                           padding=10)
+        
         self.create_widgets()
         self.load_data()
 
     def create_widgets(self):
         # Main Frame
-        self.main_frame = ttk.Frame(self.master, padding="10")
-        self.main_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.E, tk.W))
+        self.main_frame = ttk.Frame(self.master)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Category Filter
-        self.category_label = ttk.Label(self.main_frame, text="Category:")
-        self.category_label.grid(row=0, column=0, sticky=(tk.W))
+        # Category Filter as bookshelf
+        self.category_frame = ttk.Frame(self.main_frame)
+        self.category_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        # Create category buttons
+        self.category_buttons = []
+        categories = ["All"] + sorted(list(set(str(i) for i in range(5, 9))))  # 5,6,7,8
+        for category in categories:
+            btn = tk.Button(self.category_frame,
+                          text=f"{category}. Sınıf" if category != "All" else "Tümü",
+                          bg="#1E1E1E",
+                          fg="white",
+                          font=('Arial', 12, 'bold'),
+                          relief=tk.FLAT,
+                          padx=20,
+                          pady=10,
+                          command=lambda c=category: self.select_category(c))
+            btn.pack(side=tk.LEFT, padx=10)
+            self.category_buttons.append(btn)
 
-        self.category_options = ["All"]  # Initialize with "All"
-        self.category_combobox = ttk.Combobox(self.main_frame, textvariable=self.category_filter, values=self.category_options, state="readonly")
-        self.category_combobox.grid(row=0, column=1, sticky=(tk.W))
-        self.category_combobox.bind("<<ComboboxSelected>>", self.filter_by_category)
+        # Create canvas with scrollbar
+        self.canvas_frame = ttk.Frame(self.main_frame)
+        self.canvas_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.canvas = tk.Canvas(self.canvas_frame, bg='#1E1E1E')
+        self.scrollbar = ttk.Scrollbar(self.canvas_frame, orient="vertical", command=self.canvas.yview)
+        
+        self.books_frame = ttk.Frame(self.canvas, style='Dark.TFrame')
+        
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        # Pack scrollbar and canvas
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Create window inside canvas
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.books_frame, anchor="nw")
+        
+        # Configure scroll region when books frame changes
+        self.books_frame.bind("<Configure>", self.on_frame_configure)
+        self.canvas.bind("<Configure>", self.on_canvas_configure)
+        
+        # Bind mouse wheel
+        self.canvas.bind_all("<MouseWheel>", self.on_mousewheel)
 
-        # Bookshelf Frame
-        self.bookshelf_frame = ttk.Frame(self.main_frame)
-        self.bookshelf_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.E, tk.W))
+    def on_frame_configure(self, event=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-        # Canvas for Bookshelf
-        self.bookshelf_canvas = tk.Canvas(self.bookshelf_frame, bg="#D2B48C")  # Light brown for bookshelf
-        self.bookshelf_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    def on_canvas_configure(self, event):
+        # Update the width of the window inside the canvas
+        self.canvas.itemconfig(self.canvas_window, width=event.width)
 
-        # Scrollbar for Canvas
-        self.bookshelf_scrollbar = ttk.Scrollbar(self.bookshelf_frame, orient="vertical", command=self.bookshelf_canvas.yview)
-        self.bookshelf_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    def on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
-        self.bookshelf_canvas.configure(yscrollcommand=self.bookshelf_scrollbar.set)
-        self.bookshelf_canvas.bind("<Configure>", lambda e: self.bookshelf_canvas.configure(scrollregion=self.bookshelf_canvas.bbox("all")))
-
-        # Inner Frame for Books
-        self.books_frame = ttk.Frame(self.bookshelf_canvas)
-        self.bookshelf_canvas.create_window((0, 0), window=self.books_frame, anchor="nw")
-
-        # Configure row and column weights for resizing
-        self.main_frame.rowconfigure(1, weight=1)
-        self.main_frame.columnconfigure(0, weight=1)
-        self.main_frame.columnconfigure(1, weight=1)
-        self.master.columnconfigure(0, weight=1)
-        self.master.rowconfigure(0, weight=1)
-
-    def load_data(self):
+    def load_cover_image_for_book(self, url, size=(200, 280)):
         try:
-            with open(self.data_file, "r", newline="", encoding="utf-8") as file:
-                reader = csv.DictReader(file)
-                self.data = list(reader)
-
-                # Update category options
-                self.category_options.extend(sorted(list(set(app["category"] for app in self.data))))
-                self.category_combobox.config(values=self.category_options)
-
-                self.display_books()
-        except FileNotFoundError:
-            messagebox.showerror("Error", f"Data file '{self.data_file}' not found.")
+            response = requests.get(url)
+            img_data = response.content
+            img = Image.open(io.BytesIO(img_data))
+            img = img.resize(size, Image.Resampling.LANCZOS)
+            return ImageTk.PhotoImage(img)
         except Exception as e:
-            messagebox.showerror("Error", f"An error occurred while loading data: {e}")
+            print(f"Error loading image from {url}: {e}")
+            return None
+
+    def create_book_widget(self, parent, app_data, row, col):
+        frame = ttk.Frame(parent, style='Dark.TFrame')
+        frame.grid(row=row, column=col, padx=20, pady=20)
+        
+        # Load and display cover image
+        cover_image = self.load_cover_image_for_book(app_data["coverimageurl"])
+        if cover_image:
+            cover_label = ttk.Label(frame, image=cover_image)
+            cover_label.image = cover_image  # Keep a reference
+            cover_label.pack(pady=(0, 10))
+        
+        # Download button with red background
+        download_btn = tk.Button(frame,
+                               text="İNDİR",
+                               bg="#FF4136",  # Red background
+                               fg="white",    # White text
+                               font=('Arial', 10, 'bold'),
+                               relief=tk.FLAT,
+                               command=lambda: self.download_app(app_data))
+        download_btn.pack(fill=tk.X)
 
     def display_books(self):
         # Clear existing books
@@ -89,130 +136,70 @@ class AppDownloader:
         if self.category_filter.get() != "All":
             filtered_data = [app for app in self.data if app["category"] == self.category_filter.get()]
 
-        row, col = 0, 0
-        for app in filtered_data:
-            book_frame = ttk.Frame(self.books_frame, padding=5)
-            book_frame.grid(row=row, column=col, padx=5, pady=5)
+        # Calculate number of columns based on window width
+        window_width = self.master.winfo_width()
+        num_columns = max(3, window_width // 300)  # At least 3 columns, or more based on width
 
-            # Load and display cover image
-            cover_image = self.load_cover_image_for_book(app["coverimageurl"])
-            if cover_image:
-                cover_label = ttk.Label(book_frame, image=cover_image)
-                cover_label.image = cover_image
-                cover_label.pack()
+        # Create book widgets in a grid
+        for i, app in enumerate(filtered_data):
+            row = i // num_columns
+            col = i % num_columns
+            self.create_book_widget(self.books_frame, app, row, col)
 
-            # Book name label
-            name_label = ttk.Label(book_frame, text=app["name"], wraplength=100, justify="center")
-            name_label.pack()
-
-            # Download and Open Button
-            download_open_button = ttk.Button(book_frame, text="Open", command=lambda a=app: self.download_and_open(a))
-            download_open_button.pack()
-
-            col += 1
-            if col > 4:  # Adjust number of books per row
-                col = 0
-                row += 1
-
-        self.books_frame.update_idletasks()
-        self.bookshelf_canvas.configure(scrollregion=self.bookshelf_canvas.bbox("all"))
-
-    def load_cover_image_for_book(self, image_url):
-        if not image_url or image_url.strip() == "None":
-            return None
-
-        try:
-            response = requests.get(image_url, stream=True)
-            response.raise_for_status()
-
-            image_data = response.content
-            image = Image.open(io.BytesIO(image_data))
-            image.thumbnail((100, 100))  # Smaller thumbnails for bookshelf
-            photo = ImageTk.PhotoImage(image)
-            return photo
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching image: {e}")
-            return None
-        except Exception as e:
-            print(f"Error loading image: {e}")
-            return None
-
-    def filter_by_category(self, event):
+    def select_category(self, category):
+        # Update button colors
+        for btn in self.category_buttons:
+            if btn['text'] == (f"{category}. Sınıf" if category != "All" else "Tümü"):
+                btn.configure(bg="#FF4136")  # Selected category
+            else:
+                btn.configure(bg="#1E1E1E")  # Unselected categories
+        
+        self.category_filter.set(category)
         self.display_books()
 
-    def download_and_open(self, app):
-        self.selected_app = app
-        self.download_app()
-
-    def load_cover_image(self, image_url):
-        if not image_url or image_url.strip() == "None" or image_url.strip() == "none":  # Check for empty or "None"
-            self.cover_label.config(image="")  # Clear the image label
-            self.cover_label.image = None  # Remove reference
-            return  # Exit the function early
-
+    def download_app(self, app_data):
         try:
-            response = requests.get(image_url, stream=True)
-            response.raise_for_status()
-
-            image_data = response.content
-            image = Image.open(io.BytesIO(image_data))
-            image_width, image_height = image.size
-            if image_width > 150 or image_height > 150:
-                image.thumbnail((150, 150))
-            photo = ImageTk.PhotoImage(image)
-
-            self.cover_label.config(image=photo)
-            self.cover_label.image = photo
-        
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching image: {e}")
-            self.cover_label.config(image="")
-            self.cover_label.image = None
-        except Exception as e:
-            print(f"Error loading image: {e}")
-            self.cover_label.config(image="")
-            self.cover_label.image = None
-
-    def download_app(self):
-        if self.selected_app:
-            download_url = self.selected_app["downloadurl"]
-            app_name = self.selected_app["name"]
-            file_extension = os.path.splitext(download_url)[1]
-            download_path = os.path.join(self.download_folder, f"{app_name}{file_extension}")
-
-            if not os.path.exists(self.download_folder):
-                os.makedirs(self.download_folder)
-
-            try:
-                response = requests.get(download_url, stream=True)
-                response.raise_for_status()
-
-                with open(download_path, "wb") as file:
+            url = app_data["downloadurl"]
+            response = requests.get(url, stream=True)
+            
+            if response.status_code == 200:
+                # Create download folder if it doesn't exist
+                os.makedirs(self.download_folder, exist_ok=True)
+                
+                # Get filename from URL
+                filename = os.path.join(self.download_folder, url.split('/')[-1])
+                
+                # Download the file
+                with open(filename, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
-                        file.write(chunk)
+                        if chunk:
+                            f.write(chunk)
+                
+                messagebox.showinfo("Success", f"{app_data['name']} başarıyla indirildi!")
+                
+                # Open the download folder
+                os.startfile(self.download_folder)
+            else:
+                messagebox.showerror("Error", f"Download failed with status code: {response.status_code}")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred while downloading: {e}")
 
-                messagebox.showinfo("Download Complete", f"{app_name} downloaded successfully!")
-                self.downloaded_app_path = download_path
-                self.open_app()
-            except requests.exceptions.RequestException as e:
-                messagebox.showerror("Download Error", f"Error downloading {app_name}: {e}")
-            except Exception as e:
-                messagebox.showerror("Error", f"An error occurred: {e}")
-
-    def open_app(self):
-        if hasattr(self, "downloaded_app_path") and self.downloaded_app_path:
-            try:
-                # Copy unlock key to clipboard
-                pyperclip.copy(self.selected_app["unlockkey"])
-
-                if os.name == 'nt':  # Windows
-                    subprocess.Popen([self.downloaded_app_path])
-                elif os.name == 'posix':  # macOS or Linux
-                    subprocess.Popen(['open', self.downloaded_app_path])
-                else:
-                    webbrowser.open(self.downloaded_app_path)
-            except Exception as e:
-                messagebox.showerror("Error", f"An error occurred while opening the app: {e}")
+    def load_data(self):
+        try:
+            with open(self.data_file, "r", newline="", encoding="utf-8") as file:
+                reader = csv.DictReader(file)
+                self.data = list(reader)
+                
+                # Update category options
+                categories = sorted(list(set(app["category"] for app in self.data)))
+                self.category_options = ["All"] + categories
+                self.select_category("All")
+                
+                self.display_books()
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"Data file '{self.data_file}' not found.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred while loading data: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
