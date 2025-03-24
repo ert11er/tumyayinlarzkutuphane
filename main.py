@@ -1,8 +1,3 @@
-"""
-this program will get the datas from data.csv and show it to the user. it will be a gui interface. if the user clicks one one of them, it will download it and put it into the data folder. it will display the unlock key and when the user clicks the button which is under the displayed unlock key, it will open the downloaded app. it will delete the downloaded app(the app will create its own folder as well but we dont delete that), it will go back to the main menu.
-
-data.csv categories: name,downloadurl,unlockkey,category,publisher,coverimageurl
-"""
 import csv
 import os
 import requests
@@ -13,6 +8,7 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 import io
 import webbrowser
+import pyperclip  # Import pyperclip for clipboard functionality
 
 class AppDownloader:
     def __init__(self, master):
@@ -23,6 +19,7 @@ class AppDownloader:
         self.download_folder = os.path.join(os.path.dirname(__file__), "data")
         self.data = []
         self.selected_app = None
+        self.category_filter = tk.StringVar(value="All")  # Default to showing all categories
 
         self.create_widgets()
         self.load_data()
@@ -32,44 +29,36 @@ class AppDownloader:
         self.main_frame = ttk.Frame(self.master, padding="10")
         self.main_frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.E, tk.W))
 
-        # Treeview for displaying app list
-        self.tree = ttk.Treeview(self.main_frame, columns=("Name", "Category", "Publisher"), show="headings")
-        self.tree.heading("Name", text="Name")
-        self.tree.heading("Category", text="Category")
-        self.tree.heading("Publisher", text="Publisher")
-        self.tree.column("Name", width=200)
-        self.tree.column("Category", width=100)
-        self.tree.column("Publisher", width=150)
-        self.tree.bind("<ButtonRelease-1>", self.on_app_select)
-        self.tree.grid(row=0, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.E, tk.W))
+        # Category Filter
+        self.category_label = ttk.Label(self.main_frame, text="Category:")
+        self.category_label.grid(row=0, column=0, sticky=(tk.W))
 
-        # Scrollbar for Treeview
-        self.scrollbar = ttk.Scrollbar(self.main_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=self.scrollbar.set)
-        self.scrollbar.grid(row=0, column=2, sticky=(tk.N, tk.S))
+        self.category_options = ["All"]  # Initialize with "All"
+        self.category_combobox = ttk.Combobox(self.main_frame, textvariable=self.category_filter, values=self.category_options, state="readonly")
+        self.category_combobox.grid(row=0, column=1, sticky=(tk.W))
+        self.category_combobox.bind("<<ComboboxSelected>>", self.filter_by_category)
 
-        # Cover Image Label
-        self.cover_label = ttk.Label(self.main_frame)
-        self.cover_label.grid(row=1, column=0, sticky=(tk.W))
+        # Bookshelf Frame
+        self.bookshelf_frame = ttk.Frame(self.main_frame)
+        self.bookshelf_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.N, tk.S, tk.E, tk.W))
 
-        # Download Button
-        self.download_button = ttk.Button(self.main_frame, text="Download", command=self.download_app, state=tk.DISABLED)
-        self.download_button.grid(row=1, column=1, sticky=(tk.E))
+        # Canvas for Bookshelf
+        self.bookshelf_canvas = tk.Canvas(self.bookshelf_frame, bg="#D2B48C")  # Light brown for bookshelf
+        self.bookshelf_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Unlock Key Label
-        self.unlock_key_label = ttk.Label(self.main_frame, text="Unlock Key: ")
-        self.unlock_key_label.grid(row=2, column=0, sticky=(tk.W))
+        # Scrollbar for Canvas
+        self.bookshelf_scrollbar = ttk.Scrollbar(self.bookshelf_frame, orient="vertical", command=self.bookshelf_canvas.yview)
+        self.bookshelf_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Open App Button
-        self.open_app_button = ttk.Button(self.main_frame, text="Open App", command=self.open_app, state=tk.DISABLED)
-        self.open_app_button.grid(row=3, column=0, sticky=(tk.W))
+        self.bookshelf_canvas.configure(yscrollcommand=self.bookshelf_scrollbar.set)
+        self.bookshelf_canvas.bind("<Configure>", lambda e: self.bookshelf_canvas.configure(scrollregion=self.bookshelf_canvas.bbox("all")))
 
-        # Back Button
-        self.back_button = ttk.Button(self.main_frame, text="Back", command=self.go_back, state=tk.DISABLED)
-        self.back_button.grid(row=3, column=1, sticky=(tk.E))
+        # Inner Frame for Books
+        self.books_frame = ttk.Frame(self.bookshelf_canvas)
+        self.bookshelf_canvas.create_window((0, 0), window=self.books_frame, anchor="nw")
 
         # Configure row and column weights for resizing
-        self.main_frame.rowconfigure(0, weight=1)
+        self.main_frame.rowconfigure(1, weight=1)
         self.main_frame.columnconfigure(0, weight=1)
         self.main_frame.columnconfigure(1, weight=1)
         self.master.columnconfigure(0, weight=1)
@@ -80,27 +69,80 @@ class AppDownloader:
             with open(self.data_file, "r", newline="", encoding="utf-8") as file:
                 reader = csv.DictReader(file)
                 self.data = list(reader)
-                for app in self.data:
-                    self.tree.insert("", tk.END, values=(app["name"], app["category"], app["publisher"]), iid=app["name"])
+
+                # Update category options
+                self.category_options.extend(sorted(list(set(app["category"] for app in self.data))))
+                self.category_combobox.config(values=self.category_options)
+
+                self.display_books()
         except FileNotFoundError:
             messagebox.showerror("Error", f"Data file '{self.data_file}' not found.")
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred while loading data: {e}")
 
-    def on_app_select(self, event):
-        selected_item = self.tree.selection()
-        if selected_item:
-            self.selected_app_name = selected_item[0]
-            self.selected_app = next((app for app in self.data if app["name"] == self.selected_app_name), None)
-            if self.selected_app:
-                self.download_button.config(state=tk.NORMAL)
-                self.unlock_key_label.config(text=f"Unlock Key: {self.selected_app['unlockkey']}")
-                self.load_cover_image(self.selected_app["coverimageurl"])
-            else:
-                self.download_button.config(state=tk.DISABLED)
-                self.unlock_key_label.config(text="Unlock Key: ")
-                self.cover_label.config(image="")
-                self.cover_label.image = None
+    def display_books(self):
+        # Clear existing books
+        for widget in self.books_frame.winfo_children():
+            widget.destroy()
+
+        filtered_data = self.data
+        if self.category_filter.get() != "All":
+            filtered_data = [app for app in self.data if app["category"] == self.category_filter.get()]
+
+        row, col = 0, 0
+        for app in filtered_data:
+            book_frame = ttk.Frame(self.books_frame, padding=5)
+            book_frame.grid(row=row, column=col, padx=5, pady=5)
+
+            # Load and display cover image
+            cover_image = self.load_cover_image_for_book(app["coverimageurl"])
+            if cover_image:
+                cover_label = ttk.Label(book_frame, image=cover_image)
+                cover_label.image = cover_image
+                cover_label.pack()
+
+            # Book name label
+            name_label = ttk.Label(book_frame, text=app["name"], wraplength=100, justify="center")
+            name_label.pack()
+
+            # Download and Open Button
+            download_open_button = ttk.Button(book_frame, text="Open", command=lambda a=app: self.download_and_open(a))
+            download_open_button.pack()
+
+            col += 1
+            if col > 4:  # Adjust number of books per row
+                col = 0
+                row += 1
+
+        self.books_frame.update_idletasks()
+        self.bookshelf_canvas.configure(scrollregion=self.bookshelf_canvas.bbox("all"))
+
+    def load_cover_image_for_book(self, image_url):
+        if not image_url or image_url.strip() == "None":
+            return None
+
+        try:
+            response = requests.get(image_url, stream=True)
+            response.raise_for_status()
+
+            image_data = response.content
+            image = Image.open(io.BytesIO(image_data))
+            image.thumbnail((100, 100))  # Smaller thumbnails for bookshelf
+            photo = ImageTk.PhotoImage(image)
+            return photo
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching image: {e}")
+            return None
+        except Exception as e:
+            print(f"Error loading image: {e}")
+            return None
+
+    def filter_by_category(self, event):
+        self.display_books()
+
+    def download_and_open(self, app):
+        self.selected_app = app
+        self.download_app()
 
     def load_cover_image(self, image_url):
         if not image_url or image_url.strip() == "None":  # Check for empty or "None"
@@ -150,9 +192,7 @@ class AppDownloader:
 
                 messagebox.showinfo("Download Complete", f"{app_name} downloaded successfully!")
                 self.downloaded_app_path = download_path
-                self.open_app_button.config(state=tk.NORMAL)
-                self.back_button.config(state=tk.NORMAL)
-                self.download_button.config(state=tk.DISABLED)
+                self.open_app()
             except requests.exceptions.RequestException as e:
                 messagebox.showerror("Download Error", f"Error downloading {app_name}: {e}")
             except Exception as e:
@@ -161,6 +201,10 @@ class AppDownloader:
     def open_app(self):
         if hasattr(self, "downloaded_app_path") and self.downloaded_app_path:
             try:
+                # Copy unlock key to clipboard
+                pyperclip.copy(self.selected_app["unlockkey"])
+                messagebox.showinfo("Unlock Key Copied", "Unlock key copied to clipboard!")
+
                 if os.name == 'nt':  # Windows
                     subprocess.Popen([self.downloaded_app_path])
                 elif os.name == 'posix':  # macOS or Linux
@@ -170,26 +214,7 @@ class AppDownloader:
             except Exception as e:
                 messagebox.showerror("Error", f"An error occurred while opening the app: {e}")
 
-    def go_back(self):
-        if hasattr(self, "downloaded_app_path") and self.downloaded_app_path:
-            try:
-                os.remove(self.downloaded_app_path)
-                self.downloaded_app_path = None
-                self.open_app_button.config(state=tk.DISABLED)
-                self.back_button.config(state=tk.DISABLED)
-                self.unlock_key_label.config(text="Unlock Key: ")
-                self.cover_label.config(image="")
-                self.cover_label.image = None
-                self.tree.selection_remove(self.selected_app_name)
-                self.selected_app = None
-                self.selected_app_name = None
-            except FileNotFoundError:
-                messagebox.showerror("Error", "Downloaded app not found.")
-            except Exception as e:
-                messagebox.showerror("Error", f"An error occurred while deleting the app: {e}")
-
 if __name__ == "__main__":
     root = tk.Tk()
     app = AppDownloader(root)
     root.mainloop()
-
