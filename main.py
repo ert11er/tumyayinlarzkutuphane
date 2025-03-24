@@ -145,7 +145,7 @@ class AppDownloader:
         self.download_app()
 
     def load_cover_image(self, image_url):
-        if not image_url or image_url.strip() == "None":  # Check for empty or "None"
+        if not image_url or image_url.strip() == "None" or image_url.strip() == "none":  # Check for empty or "None"
             self.cover_label.config(image="")  # Clear the image label
             self.cover_label.image = None  # Remove reference
             return  # Exit the function early
@@ -163,6 +163,7 @@ class AppDownloader:
 
             self.cover_label.config(image=photo)
             self.cover_label.image = photo
+        
         except requests.exceptions.RequestException as e:
             print(f"Error fetching image: {e}")
             self.cover_label.config(image="")
