@@ -203,7 +203,6 @@ class AppDownloader:
             try:
                 # Copy unlock key to clipboard
                 pyperclip.copy(self.selected_app["unlockkey"])
-                messagebox.showinfo("Unlock Key Copied", "Unlock key copied to clipboard!")
 
                 if os.name == 'nt':  # Windows
                     subprocess.Popen([self.downloaded_app_path])
