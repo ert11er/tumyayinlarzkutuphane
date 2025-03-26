@@ -9,6 +9,7 @@ from PIL import Image, ImageTk
 import io
 import webbrowser
 import pyperclip
+import hashlib
 
 class AppDownloader:
     def __init__(self, master):
@@ -20,6 +21,7 @@ class AppDownloader:
         master.state('zoomed')  # Make window maximized
         
         self.data_file = "data.csv"
+        self.github_data_url = "https://raw.githubusercontent.com/ert11er/tumyayinlarzkutuphane/main/data.csv"
         self.download_folder = os.path.join(os.path.dirname(__file__), "data")
         self.data = []
         self.selected_app = None
@@ -33,7 +35,41 @@ class AppDownloader:
                            padding=10)
         
         self.create_widgets()
+        self.check_data_file()
         self.load_data()
+
+    def check_data_file(self):
+        """Check if data.csv exists, download it if not, or compare with GitHub version if it exists"""
+        try:
+            # Try to get the GitHub version of the file
+            response = requests.get(self.github_data_url)
+            if response.status_code != 200:
+                messagebox.showerror("Error", f"Failed to access GitHub data file: {response.status_code}")
+                return
+            
+            github_content = response.text
+            
+            # Check if local file exists
+            if not os.path.exists(self.data_file):
+                # File doesn't exist, download it
+                with open(self.data_file, "w", encoding="utf-8") as file:
+                    file.write(github_content)
+                messagebox.showinfo("Information", "Data file downloaded from GitHub.")
+            else:
+                # File exists, compare with GitHub version
+                with open(self.data_file, "r", encoding="utf-8") as file:
+                    local_content = file.read()
+                
+                # Compare the files
+                if local_content != github_content:
+                    # Files are different, ask user if they want to update
+                    if messagebox.askyesno("Update Available", 
+                                          "A new version of the data file is available on GitHub. Would you like to update?"):
+                        with open(self.data_file, "w", encoding="utf-8") as file:
+                            file.write(github_content)
+                        messagebox.showinfo("Information", "Data file updated from GitHub.")
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred while checking data file: {e}")
 
     def create_widgets(self):
         # Main Frame
@@ -204,4 +240,5 @@ class AppDownloader:
 if __name__ == "__main__":
     root = tk.Tk()
     app = AppDownloader(root)
+    app.check_data_file()
     root.mainloop()
