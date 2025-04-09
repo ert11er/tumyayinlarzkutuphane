@@ -12,33 +12,44 @@ import pyperclip
 import hashlib
 
 class AppDownloader:
+    """
+    A GUI application for downloading educational content from a digital library.
+    Displays books organized by category with cover images and download buttons.
+    """
+    
     def __init__(self, master):
         self.master = master
-        master.title("TÜM Yayinlar Z-Kütüphane")
-        
-        # Configure the window
-        master.configure(bg='#1E1E1E')  # Dark background
-        master.state('zoomed')  # Make window maximized
-        
+        self.setup_window()
+        self.initialize_variables()
+        self.setup_styles()
+        self.create_widgets()
+        self.check_data_file()
+        self.load_data()
+
+    def setup_window(self):
+        """Configure the main window settings."""
+        self.master.title("TÜM Yayinlar Z-Kütüphane")
+        self.master.configure(bg='#1E1E1E')
+        self.master.state('zoomed')
+
+    def initialize_variables(self):
+        """Initialize instance variables and constants."""
         self.data_file = "data.csv"
         self.github_data_url = "https://raw.githubusercontent.com/ert11er/tumyayinlarzkutuphane/main/data.csv"
         self.download_folder = os.path.join(os.path.dirname(__file__), "data")
         self.data = []
-        self.selected_app = None
+        self.images = []  # Store references to prevent garbage collection
         self.category_filter = tk.StringVar(value="All")
-        self.images = []  # Store references to all images
-        
-        # Configure style
+        self.category_buttons = []
+
+    def setup_styles(self):
+        """Configure ttk styles for widgets."""
         self.style = ttk.Style()
         self.style.configure("Red.TButton", 
                            background="#FF4136", 
                            foreground="white",
                            padding=10)
         self.style.configure("Dark.TFrame", background="#1E1E1E")
-        
-        self.create_widgets()
-        self.check_data_file()
-        self.load_data()
 
     def check_data_file(self):
         """Check if data.csv exists, download it if not, or compare with GitHub version if it exists"""
@@ -74,71 +85,91 @@ class AppDownloader:
             messagebox.showerror("Error", f"An error occurred while checking data file: {e}")
 
     def create_widgets(self):
-        # Main Frame
+        """Create and arrange all GUI widgets."""
+        self._create_main_frame()
+        self._create_navigation()
+        self._create_book_display_area()
+        self._create_status_bar()
+
+    def _create_main_frame(self):
+        """Create the main container frame."""
         self.main_frame = ttk.Frame(self.master, style="Dark.TFrame")
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Create page navigation frame
+    def _create_navigation(self):
+        """Create navigation elements including home button and category tabs."""
+        # Navigation frame
         self.nav_frame = ttk.Frame(self.main_frame, style="Dark.TFrame")
         self.nav_frame.pack(fill=tk.X, pady=(0, 10))
         
         # Home button
-        self.home_button = tk.Button(self.nav_frame, 
-                                   text="⌂", 
-                                   font=('Arial', 14), 
-                                   bg="#1E1E1E", 
-                                   fg="white",
-                                   relief=tk.FLAT,
-                                   command=lambda: self.select_category("All"))
+        self.home_button = tk.Button(
+            self.nav_frame,
+            text="⌂",
+            font=('Arial', 14),
+            bg="#1E1E1E",
+            fg="white",
+            relief=tk.FLAT,
+            command=lambda: self.select_category("All")
+        )
         self.home_button.pack(side=tk.LEFT, padx=5)
         
-        # Category tabs (dynamic categories)
+        # Category tabs container
         self.tab_frame = ttk.Frame(self.main_frame, style="Dark.TFrame")
         self.tab_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        self.category_buttons = []
 
-        # Create canvas with scrollbar for book display
+    def _create_book_display_area(self):
+        """Create scrollable canvas for displaying books."""
+        # Canvas frame container
         self.canvas_frame = ttk.Frame(self.main_frame, style="Dark.TFrame")
         self.canvas_frame.pack(fill=tk.BOTH, expand=True)
         
+        # Create canvas and scrollbar
         self.canvas = tk.Canvas(self.canvas_frame, bg='#1E1E1E', highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(self.canvas_frame, orient="vertical", command=self.canvas.yview)
-        
         self.books_frame = ttk.Frame(self.canvas, style='Dark.TFrame')
         
+        # Configure canvas
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        
-        # Pack scrollbar and canvas
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Create window inside canvas
         self.canvas_window = self.canvas.create_window((0, 0), window=self.books_frame, anchor="nw")
         
-        # Configure scroll region when books frame changes
+        # Bind events
         self.books_frame.bind("<Configure>", self.on_frame_configure)
         self.canvas.bind("<Configure>", self.on_canvas_configure)
-        
-        # Bind mouse wheel
-        self.canvas.bind_all("<MouseWheel>", self.on_mousewheel)
-        
-        # Status bar showing current time and date
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _create_status_bar(self):
+        """Create status bar with date and version information."""
         self.status_frame = ttk.Frame(self.main_frame, style="Dark.TFrame")
         self.status_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
         
-        self.status_label = ttk.Label(self.status_frame, 
-                                    text="26.03.2025",
-                                    foreground="white", 
-                                    background="#1E1E1E",
-                                    font=('Arial', 8))
+        # Date label
+        self.status_label = ttk.Label(
+            self.status_frame,
+            text="26.03.2025",
+            foreground="white",
+            background="#1E1E1E",
+            font=('Arial', 8)
+        )
         self.status_label.pack(side=tk.LEFT)
         
-        self.version_label = ttk.Label(self.status_frame, 
-                                     text="PERNUS",
-                                     foreground="white", 
-                                     background="#1E1E1E",
-                                     font=('Arial', 8))
+        # Version label
+        self.version_label = ttk.Label(
+            self.status_frame,
+            text="PERNUS",
+            foreground="white",
+            background="#1E1E1E",
+            font=('Arial', 8)
+        )
         self.version_label.pack(side=tk.RIGHT)
+
+    def _on_mousewheel(self, event):
+        """Handle mousewheel scrolling."""
+        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
     def on_frame_configure(self, event=None):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -146,9 +177,6 @@ class AppDownloader:
     def on_canvas_configure(self, event):
         # Update the width of the window inside the canvas
         self.canvas.itemconfig(self.canvas_window, width=event.width)
-
-    def on_mousewheel(self, event):
-        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
     def load_cover_image_for_book(self, url, size=(180, 250)):
         try:
