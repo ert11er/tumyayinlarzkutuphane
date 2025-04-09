@@ -34,12 +34,22 @@ class AppDownloader:
 
     def initialize_variables(self):
         """Initialize instance variables and constants."""
+        # File paths and URLs
         self.data_file = "data.csv"
         self.github_data_url = "https://raw.githubusercontent.com/ert11er/tumyayinlarzkutuphane/main/data.csv"
         self.download_folder = os.path.join(os.path.dirname(__file__), "data")
+        self.assets_folder = os.path.join(os.path.dirname(__file__), "assets")
+        
+        # Ensure required directories exist
+        os.makedirs(self.download_folder, exist_ok=True)
+        os.makedirs(self.assets_folder, exist_ok=True)
+        
+        # Data storage
         self.data = []
-        self.images = []  # Store references to prevent garbage collection
+        self.images = {}  # Store image cache with URLs as keys
         self.category_filter = tk.StringVar(value="All")
+        
+        print("[LOG] Initialized variables and created necessary directories")
 
     def setup_styles(self):
         """Configure ttk styles for widgets."""
@@ -111,23 +121,43 @@ class AppDownloader:
         """Update canvas window width when canvas is resized."""
         self.canvas.itemconfig(self.canvas_window, width=event.width)
 
-    def load_cover_image_for_book(self, url, size=(180, 250)):
+    def get_cached_image(self, url, size=(180, 250)):
+        """Get image from cache or download and cache it."""
+        # Create hash of URL for filename
+        url_hash = hashlib.md5(url.encode()).hexdigest()
+        cache_path = os.path.join(self.assets_folder, f"{url_hash}.png")
+        
         try:
-            print(f"[LOG] Loading cover image from URL: {url}")
-            response = requests.get(url)
+            # Check if image exists in cache
+            if os.path.exists(cache_path):
+                print(f"[LOG] Loading cached image for: {url}")
+                img = Image.open(cache_path)
+                photo_img = ImageTk.PhotoImage(img)
+                self.images[url] = photo_img
+                return photo_img
+            
+            # If not in cache, download and save
+            print(f"[LOG] Downloading new image: {url}")
+            response = requests.get(url, timeout=10)
             img_data = response.content
             img = Image.open(io.BytesIO(img_data))
             img = img.resize(size, Image.Resampling.LANCZOS)
+            
+            # Save to cache
+            img.save(cache_path)
+            print(f"[LOG] Saved image to cache: {cache_path}")
+            
+            # Create PhotoImage and store in memory
             photo_img = ImageTk.PhotoImage(img)
-            self.images.append(photo_img)
-            print("[LOG] Successfully loaded and processed cover image")
+            self.images[url] = photo_img
             return photo_img
+            
         except Exception as e:
             print(f"[LOG] ERROR loading image from {url}: {e}")
             print("[LOG] Creating placeholder image")
             img = Image.new('RGB', size, color='#2E2E2E')
             photo_img = ImageTk.PhotoImage(img)
-            self.images.append(photo_img)
+            self.images[url] = photo_img
             return photo_img
 
     def create_book_widget(self, parent, app_data, row, col):
@@ -137,24 +167,38 @@ class AppDownloader:
         frame.grid(row=row, column=col, padx=5, pady=5)
         
         # Load cover image
-        cover_image = self.load_cover_image_for_book(app_data["coverimageurl"], size=(150, 200))
+        cover_image = self.get_cached_image(app_data["coverimageurl"], size=(150, 200))
         if cover_image:
-            # Use tk.Label instead of ttk.Label for image display
             cover_label = tk.Label(frame, image=cover_image, bg="#1E1E1E")
             cover_label.pack()
         
-        # Book name label
+        # Book information
+        info_frame = ttk.Frame(frame, style='Dark.TFrame')
+        info_frame.pack(fill=tk.X, pady=(5, 5))
+        
+        # Book name
         name_label = tk.Label(
-            frame,
+            info_frame,
             text=app_data["name"],
             bg="#1E1E1E",
             fg="white",
-            wraplength=150,  # Wrap text if too long
+            wraplength=150,
             justify=tk.CENTER
         )
-        name_label.pack(pady=(5, 5))
+        name_label.pack()
         
-        # Red download button banner
+        # Publisher info
+        publisher_label = tk.Label(
+            info_frame,
+            text=app_data["publisher"],
+            bg="#1E1E1E",
+            fg="gray",
+            font=('Arial', 8),
+            wraplength=150
+        )
+        publisher_label.pack()
+        
+        # Download button
         button_frame = ttk.Frame(frame, style='Red.TFrame')
         button_frame.pack(fill=tk.X)
         
@@ -237,68 +281,72 @@ class AppDownloader:
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def download_app(self, app_data):
+        """Handle the download and activation process for a book."""
         try:
             url = app_data["downloadurl"]
             unlock_key = app_data["unlockkey"]
-            print(f"[LOG] Attempting to process URL: {url}")
+            print(f"[LOG] Starting download process for: {app_data['name']}")
+            print(f"[LOG] Publisher: {app_data['publisher']}")
+            print(f"[LOG] Category: {app_data['category']}")
             
-            
-            # Check if URL starts with "site://"
+            # Handle site:// URLs
             if url.startswith("site://"):
                 actual_url = url[7:]
-                print(f"[LOG] Opening browser with URL: {actual_url}")
+                print(f"[LOG] Opening browser URL: {actual_url}")
                 webbrowser.open(actual_url)
                 return
             
-            # First, copy the unlock key to clipboard
-            if unlock_key == "none":
-                print(f"[LOG] Skipped copying unlock key to clipboard : no code")
-            else:
+            # Handle activation key
+            if unlock_key.lower() != "none":
                 pyperclip.copy(unlock_key)
-                print(f"[LOG] Copied unlock key to clipboard: {unlock_key}")
-                messagebox.showinfo("Activation Key", f"Activation key '{unlock_key}' has been copied to clipboard")
+                print(f"[LOG] Copied activation key to clipboard: {unlock_key}")
+                messagebox.showinfo("Activation Key", 
+                                  f"Activation key '{unlock_key}' has been copied to clipboard\n\n"
+                                  f"Publisher: {app_data['publisher']}")
             
-
-            print(f"[LOG] Starting download for: {app_data['name']}")
+            # Download process
+            print(f"[LOG] Downloading from URL: {url}")
             response = requests.get(url, stream=True)
             
             if response.status_code == 200:
-                print(f"[LOG] Download request successful with status code: {response.status_code}")
-                
-                # Create download folder if it doesn't exist
-                os.makedirs(self.download_folder, exist_ok=True)
-                print(f"[LOG] Download folder verified: {self.download_folder}")
-                
-                # Get original filename from URL and add unlock key
+                # Prepare filename
                 original_filename = url.split('/')[-1]
                 base_name, extension = os.path.splitext(original_filename)
-                new_filename = f"{base_name}_{unlock_key}{extension}"
+                new_filename = f"{base_name}_{unlock_key}{extension}" if unlock_key.lower() != "none" else original_filename
                 filename = os.path.join(self.download_folder, new_filename)
+                
                 print(f"[LOG] Saving file as: {filename}")
                 
-                # Download the file
+                # Download with progress tracking
+                total_size = int(response.headers.get('content-length', 0))
+                block_size = 8192
+                downloaded = 0
+                
                 with open(filename, 'wb') as f:
-                    print("[LOG] Writing file data...")
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=block_size):
                         if chunk:
                             f.write(chunk)
-                print("[LOG] File write complete")
+                            downloaded += len(chunk)
+                            print(f"[LOG] Download progress: {downloaded}/{total_size} bytes")
                 
-                messagebox.showinfo("Success", f"{app_data['name']} başarıyla indirildi!")
-                print(f"[LOG] Success message shown for: {app_data['name']}")
+                print("[LOG] Download completed successfully")
+                messagebox.showinfo("Success", 
+                                  f"{app_data['name']} başarıyla indirildi!\n\n"
+                                  f"Publisher: {app_data['publisher']}")
                 
-                # Open the downloaded file
-                print(f"[LOG] Opening file: {filename}")
+                # Open the file
+                print(f"[LOG] Attempting to open file: {filename}")
                 try:
                     os.startfile(filename)
                 except Exception as e:
-                    print(f"[LOG] Error opening file: {e}")
-                    # If we can't open the file directly, open its folder
+                    print(f"[LOG] Could not open file directly: {e}")
+                    print(f"[LOG] Opening containing folder instead")
                     os.startfile(self.download_folder)
             else:
                 error_msg = f"Download failed with status code: {response.status_code}"
                 print(f"[LOG] ERROR: {error_msg}")
                 messagebox.showerror("Error", error_msg)
+            
         except Exception as e:
             error_msg = f"An error occurred while downloading: {e}"
             print(f"[LOG] EXCEPTION: {error_msg}")
