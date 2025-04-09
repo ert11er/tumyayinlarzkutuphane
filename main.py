@@ -153,14 +153,14 @@ class AppDownloader:
                     response = requests.get(url, timeout=10)
                     response.raise_for_status()  # Raise an error for bad status codes
                     
-                    img_data = response.content
-                    img = Image.open(io.BytesIO(img_data))
+            img_data = response.content
+            img = Image.open(io.BytesIO(img_data))
                     
                     # Convert to RGBA to ensure compatibility
                     img = img.convert('RGBA')
                     
                     # Resize image
-                    img = img.resize(size, Image.Resampling.LANCZOS)
+            img = img.resize(size, Image.Resampling.LANCZOS)
                     
                     # Save to cache
                     img.save(cache_path, 'PNG')
@@ -239,7 +239,7 @@ class AppDownloader:
         # Update label with actual image
         def update_image():
             cover_image = self.get_cached_image(app_data["coverimageurl"], size=(150, 200))
-            if cover_image:
+        if cover_image:
                 cover_label.configure(image=cover_image)
                 cover_label.image = cover_image  # Keep a reference
         
@@ -278,11 +278,11 @@ class AppDownloader:
         
         download_btn = tk.Button(
             button_frame,
-            text="İNDİR",
+                               text="İNDİR",
             bg="#FF4136",
             fg="white",
-            font=('Arial', 10, 'bold'),
-            relief=tk.FLAT,
+                               font=('Arial', 10, 'bold'),
+                               relief=tk.FLAT,
             command=lambda: self.download_app(app_data)
         )
         download_btn.pack(fill=tk.X)
@@ -409,7 +409,7 @@ class AppDownloader:
                 except Exception as e:
                     print(f"[LOG] Could not open file directly: {e}")
                     print(f"[LOG] Opening containing folder instead")
-                    os.startfile(self.download_folder)
+                os.startfile(self.download_folder)
             else:
                 error_msg = f"Download failed with status code: {response.status_code}"
                 print(f"[LOG] ERROR: {error_msg}")
