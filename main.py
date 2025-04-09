@@ -32,9 +32,23 @@ class AppDownloader:
         self.master.configure(bg='#1E1E1E')
         self.master.state('zoomed')
         
-        # Create main content area
-        self.content = ttk.Frame(self.master, style='Dark.TFrame')
-        self.content.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        # Create scrollable main content area
+        self.canvas = tk.Canvas(self.master, bg='#1E1E1E', highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.master, orient="vertical", command=self.canvas.yview)
+        self.content = ttk.Frame(self.canvas, style='Dark.TFrame')
+        
+        # Configure scrolling
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Create window inside canvas
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.content, anchor="nw")
+        
+        # Configure canvas scrolling
+        self.content.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", self.on_canvas_configure)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
     def initialize_variables(self):
         """Initialize instance variables and constants."""
@@ -50,7 +64,6 @@ class AppDownloader:
         """Configure ttk styles for widgets."""
         self.style = ttk.Style()
         self.style.configure("Dark.TFrame", background="#1E1E1E")
-        self.style.configure("Grid.TFrame", background="#2E2E2E")
         self.style.configure("Red.TFrame", background="#FF4136")
         self.style.configure("Separator.TFrame", background="white")
 
@@ -289,7 +302,7 @@ class AppDownloader:
         for category in categories:
             # Create category section container
             section_frame = ttk.Frame(self.content, style='Dark.TFrame')
-            section_frame.pack(fill=tk.X, pady=(0, 20))
+            section_frame.pack(fill=tk.X, pady=(20, 0))
             
             # Create large category number
             category_label = ttk.Label(
@@ -297,9 +310,9 @@ class AppDownloader:
                 text=category,
                 background="#1E1E1E",
                 foreground="white",
-                font=('Arial', 24, 'bold')
+                font=('Arial', 36, 'bold')  # Made larger
             )
-            category_label.pack(anchor='w', padx=10, pady=(10, 5))
+            category_label.pack(anchor='w', padx=10, pady=(0, 10))
             
             # Create frame for top row of INDIR buttons
             top_buttons_frame = ttk.Frame(section_frame, style='Dark.TFrame')
@@ -308,29 +321,30 @@ class AppDownloader:
             # Get books for this category
             category_books = [app for app in self.data if app["category"] == category]
             
-            # Create top INDIR buttons
-            for i, book in enumerate(category_books):
-                btn = tk.Button(
-                    top_buttons_frame,
-                    text="İNDİR",
-                    bg="#FF4136",
-                    fg="white",
-                    font=('Arial', 10, 'bold'),
-                    relief=tk.FLAT,
-                    command=lambda b=book: self.download_app(b)
-                )
-                btn.pack(side=tk.LEFT, padx=(0, 5), pady=5)
+            # Create rows of INDIR buttons (10 per row)
+            buttons_per_row = 10
+            for i in range(0, len(category_books), buttons_per_row):
+                row_frame = ttk.Frame(top_buttons_frame, style='Dark.TFrame')
+                row_frame.pack(fill=tk.X, pady=(0, 5))
+                
+                # Create INDIR buttons for this row
+                for j, book in enumerate(category_books[i:i+buttons_per_row]):
+                    btn_frame = ttk.Frame(row_frame, style='Red.TFrame')
+                    btn_frame.pack(side=tk.LEFT, padx=(0, 5))
+                    
+                    btn = tk.Button(
+                        btn_frame,
+                        text="İNDİR",
+                        bg="#FF4136",
+                        fg="white",
+                        font=('Arial', 10, 'bold'),
+                        relief=tk.FLAT,
+                        command=lambda b=book: self.download_app(b)
+                    )
+                    btn.pack(padx=1, pady=1)
             
-            # Create frame for book displays
-            books_frame = ttk.Frame(section_frame, style='Dark.TFrame')
-            books_frame.pack(fill=tk.X, padx=10)
-            
-            # Display books
-            for i, book in enumerate(category_books):
-                self.create_book_widget(books_frame, book, 0, i)
-            
-            # Add separator
-            separator = ttk.Frame(section_frame, height=1, style='Separator.TFrame')
+            # Add white separator line
+            separator = ttk.Frame(section_frame, height=2, style='Separator.TFrame')
             separator.pack(fill=tk.X, pady=(20, 0))
 
     def download_app(self, app_data):
