@@ -71,3 +71,88 @@ For issues and questions, please open an issue on the GitHub repository.
 ## Version
 
 Current Version: PERNUS (as of 26.03.2025)
+
+## Contributing
+
+We welcome contributions to improve TÜM Yayınlar Z-Kütüphane! Here's how you can help:
+
+### Ways to Contribute
+
+1. **Code Contributions**
+   - Fork the repository
+   - Create a new branch (`git checkout -b feature/improvement`)
+   - Make your changes
+   - Test your changes thoroughly
+   - Submit a Pull Request with a clear description of the changes
+
+2. **Bug Reports**
+   - Use the GitHub Issues section
+   - Include detailed steps to reproduce the bug
+   - Provide system information (OS, Python version)
+   - Add screenshots if relevant
+
+3. **Feature Requests**
+   - Use the GitHub Issues section with the "enhancement" label
+   - Clearly describe the feature and its use case
+   - Provide examples if possible
+
+4. **Documentation**
+   - Help improve the README
+   - Add code comments
+   - Create user guides or tutorials
+
+### Development Setup
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/tumyayinlarzkutuphane.git
+cd tumyayinlarzkutuphane
+```
+
+2. Create a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install development dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+### Code Style Guidelines
+
+- Follow PEP 8 style guide
+- Use meaningful variable and function names
+- Add docstrings to functions and classes
+- Keep functions focused and single-purpose
+- Comment complex logic
+
+### Testing
+
+- Add tests for new features
+- Ensure existing tests pass
+- Test on different Python versions if possible
+
+### Commit Guidelines
+
+- Use clear and descriptive commit messages
+- Reference issues and pull requests
+- Keep commits focused and atomic
+- Format: `type(scope): description`
+  - Example: `feat(ui): add dark mode toggle`
+  - Types: feat, fix, docs, style, refactor, test, chore
+
+### Pull Request Process
+
+1. Update the README.md with details of changes if needed
+2. Update the requirements.txt if you add dependencies
+3. The PR will be merged once you have the sign-off of at least one maintainer
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Code of Conduct
+
+Please note that this project is released with a Contributor Code of Conduct. By participating in this project you agree to abide by its terms.
