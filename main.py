@@ -121,43 +121,108 @@ class AppDownloader:
         """Update canvas window width when canvas is resized."""
         self.canvas.itemconfig(self.canvas_window, width=event.width)
 
-    def get_cached_image(self, url, size=(180, 250)):
-        """Get image from cache or download and cache it."""
+    def get_cached_image(self, url, size=(180, 250), max_retries=3):
+        """Get image from cache or download and cache it with retry mechanism."""
         # Create hash of URL for filename
         url_hash = hashlib.md5(url.encode()).hexdigest()
         cache_path = os.path.join(self.assets_folder, f"{url_hash}.png")
         
+        # If we already have this image in memory, return it
+        if url in self.images:
+            print(f"[LOG] Using memory-cached image for: {url}")
+            return self.images[url]
+        
         try:
             # Check if image exists in cache
             if os.path.exists(cache_path):
-                print(f"[LOG] Loading cached image for: {url}")
-                img = Image.open(cache_path)
-                photo_img = ImageTk.PhotoImage(img)
-                self.images[url] = photo_img
-                return photo_img
+                print(f"[LOG] Loading disk-cached image for: {url}")
+                try:
+                    img = Image.open(cache_path)
+                    img = img.convert('RGBA')  # Convert to RGBA to ensure compatibility
+                    photo_img = ImageTk.PhotoImage(img)
+                    self.images[url] = photo_img
+                    return photo_img
+                except Exception as e:
+                    print(f"[LOG] Error loading cached image, will try downloading again: {e}")
+                    # If cached image is corrupted, continue to download
             
-            # If not in cache, download and save
-            print(f"[LOG] Downloading new image: {url}")
-            response = requests.get(url, timeout=10)
-            img_data = response.content
-            img = Image.open(io.BytesIO(img_data))
-            img = img.resize(size, Image.Resampling.LANCZOS)
-            
-            # Save to cache
-            img.save(cache_path)
-            print(f"[LOG] Saved image to cache: {cache_path}")
-            
-            # Create PhotoImage and store in memory
-            photo_img = ImageTk.PhotoImage(img)
-            self.images[url] = photo_img
-            return photo_img
+            # If not in cache, try downloading with retries
+            for attempt in range(max_retries):
+                try:
+                    print(f"[LOG] Downloading image (attempt {attempt + 1}/{max_retries}): {url}")
+                    response = requests.get(url, timeout=10)
+                    response.raise_for_status()  # Raise an error for bad status codes
+                    
+                    img_data = response.content
+                    img = Image.open(io.BytesIO(img_data))
+                    
+                    # Convert to RGBA to ensure compatibility
+                    img = img.convert('RGBA')
+                    
+                    # Resize image
+                    img = img.resize(size, Image.Resampling.LANCZOS)
+                    
+                    # Save to cache
+                    img.save(cache_path, 'PNG')
+                    print(f"[LOG] Saved image to cache: {cache_path}")
+                    
+                    # Create PhotoImage and store in memory
+                    photo_img = ImageTk.PhotoImage(img)
+                    self.images[url] = photo_img
+                    return photo_img
+                    
+                except requests.exceptions.RequestException as e:
+                    print(f"[LOG] Download attempt {attempt + 1} failed: {e}")
+                    if attempt == max_retries - 1:  # Last attempt
+                        raise  # Re-raise the exception if all retries failed
+                    continue
             
         except Exception as e:
             print(f"[LOG] ERROR loading image from {url}: {e}")
-            print("[LOG] Creating placeholder image")
-            img = Image.new('RGB', size, color='#2E2E2E')
+            return self.create_placeholder_image(size, url)
+
+    def create_placeholder_image(self, size=(180, 250), url=None):
+        """Create a placeholder image with error text."""
+        try:
+            print(f"[LOG] Creating placeholder image for: {url}")
+            # Create a new image with a dark background
+            img = Image.new('RGBA', size, color='#2E2E2E')
+            
+            # Add some error text to the placeholder
+            from PIL import ImageDraw, ImageFont
+            draw = ImageDraw.Draw(img)
+            
+            # Add error icon or symbol
+            error_text = "!"
+            # Try to get a font, fall back to default if not available
+            try:
+                font = ImageFont.truetype("arial.ttf", 40)
+            except:
+                font = ImageFont.load_default()
+            
+            # Center the text
+            text_bbox = draw.textbbox((0, 0), error_text, font=font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+            x = (size[0] - text_width) // 2
+            y = (size[1] - text_height) // 2
+            
+            # Draw the error symbol
+            draw.text((x, y), error_text, fill='#FF4136', font=font)
+            
+            # Create PhotoImage and store in memory
             photo_img = ImageTk.PhotoImage(img)
-            self.images[url] = photo_img
+            if url:
+                self.images[url] = photo_img
+            return photo_img
+            
+        except Exception as e:
+            print(f"[LOG] ERROR creating placeholder image: {e}")
+            # If everything fails, create a basic colored rectangle
+            img = Image.new('RGBA', size, color='#FF4136')
+            photo_img = ImageTk.PhotoImage(img)
+            if url:
+                self.images[url] = photo_img
             return photo_img
 
     def create_book_widget(self, parent, app_data, row, col):
@@ -166,11 +231,20 @@ class AppDownloader:
         frame = ttk.Frame(parent, style='Dark.TFrame')
         frame.grid(row=row, column=col, padx=5, pady=5)
         
-        # Load cover image
-        cover_image = self.get_cached_image(app_data["coverimageurl"], size=(150, 200))
-        if cover_image:
-            cover_label = tk.Label(frame, image=cover_image, bg="#1E1E1E")
-            cover_label.pack()
+        # Load cover image with loading indicator
+        loading_placeholder = self.create_placeholder_image(size=(150, 200))
+        cover_label = tk.Label(frame, image=loading_placeholder, bg="#1E1E1E")
+        cover_label.pack()
+        
+        # Update label with actual image
+        def update_image():
+            cover_image = self.get_cached_image(app_data["coverimageurl"], size=(150, 200))
+            if cover_image:
+                cover_label.configure(image=cover_image)
+                cover_label.image = cover_image  # Keep a reference
+        
+        # Schedule image loading
+        self.master.after(10, update_image)
         
         # Book information
         info_frame = ttk.Frame(frame, style='Dark.TFrame')
@@ -300,9 +374,6 @@ class AppDownloader:
             if unlock_key.lower() != "none":
                 pyperclip.copy(unlock_key)
                 print(f"[LOG] Copied activation key to clipboard: {unlock_key}")
-                messagebox.showinfo("Activation Key", 
-                                  f"Activation key '{unlock_key}' has been copied to clipboard\n\n"
-                                  f"Publisher: {app_data['publisher']}")
             
             # Download process
             print(f"[LOG] Downloading from URL: {url}")
@@ -330,9 +401,6 @@ class AppDownloader:
                             print(f"[LOG] Download progress: {downloaded}/{total_size} bytes")
                 
                 print("[LOG] Download completed successfully")
-                messagebox.showinfo("Success", 
-                                  f"{app_data['name']} başarıyla indirildi!\n\n"
-                                  f"Publisher: {app_data['publisher']}")
                 
                 # Open the file
                 print(f"[LOG] Attempting to open file: {filename}")
@@ -388,7 +456,6 @@ class AppDownloader:
                         with open(self.data_file, "w", encoding="utf-8") as file:
                             file.write(response.text)
                         print("[LOG] Data file successfully downloaded")
-                        messagebox.showinfo("Information", "Data file downloaded from GitHub.")
                     else:
                         print(f"[LOG] Failed to download: HTTP {response.status_code}")
                         messagebox.showerror("Error", f"Failed to download data file: {response.status_code}")
@@ -427,7 +494,6 @@ class AppDownloader:
                                 with open(self.data_file, "w", encoding="utf-8") as file:
                                     file.write(github_content)
                                 print("[LOG] Data file updated from GitHub")
-                                messagebox.showinfo("Information", "Data file updated from GitHub.")
                         else:
                             print("[LOG] Data file is up to date")
                     else:
