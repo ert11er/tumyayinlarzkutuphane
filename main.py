@@ -73,28 +73,38 @@ class AppDownloader:
         )
         self.version_label.pack(side=tk.RIGHT, padx=10)
         
-        # Main scrollable area
-        self.canvas = tk.Canvas(self.master, bg='#1E1E1E', highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.master, orient="vertical", command=self.canvas.yview)
+        # Create a frame to hold the canvas and scrollbar
+        self.canvas_frame = ttk.Frame(self.master)
+        self.canvas_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
-        # Main content frame
-        self.content_frame = ttk.Frame(self.canvas, style='Dark.TFrame')
+        # Main scrollable area
+        self.canvas = tk.Canvas(self.canvas_frame, bg='#1E1E1E', highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.canvas_frame, orient="vertical", command=self.canvas.yview)
         
         # Configure scrolling
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        # Pack scrollbar and canvas
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Main content frame
+        self.content_frame = ttk.Frame(self.canvas, style='Dark.TFrame')
         
         # Create window inside canvas
         self.canvas_window = self.canvas.create_window((0, 0), window=self.content_frame, anchor="nw")
         
         # Configure canvas scrolling
-        self.content_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.content_frame.bind("<Configure>", self._on_frame_configure)
         self.canvas.bind("<Configure>", self.on_canvas_configure)
-        self.canvas.bind_all("<MouseWheel>", self.on_mousewheel)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
-    def on_mousewheel(self, event):
-        """Handle mousewheel scrolling."""
+    def _on_frame_configure(self, event=None):
+        """Reset the scroll region to encompass the inner frame"""
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_mousewheel(self, event):
+        """Handle mousewheel scrolling"""
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
     def on_canvas_configure(self, event):
@@ -133,6 +143,17 @@ class AppDownloader:
             cover_label = tk.Label(frame, image=cover_image, bg="#1E1E1E")
             cover_label.pack()
         
+        # Book name label
+        name_label = tk.Label(
+            frame,
+            text=app_data["name"],
+            bg="#1E1E1E",
+            fg="white",
+            wraplength=150,  # Wrap text if too long
+            justify=tk.CENTER
+        )
+        name_label.pack(pady=(5, 5))
+        
         # Red download button banner
         button_frame = ttk.Frame(frame, style='Red.TFrame')
         button_frame.pack(fill=tk.X)
@@ -155,32 +176,47 @@ class AppDownloader:
         for widget in self.content_frame.winfo_children():
             widget.destroy()
         
-        # Extract unique categories from data, excluding 'all'
-        categories = {}
+        # Extract unique categories from data
+        categories = {'5': [], '6': [], '7': []}  # Initialize all categories
+        all_category_books = []  # Store books with 'all' category
+        
         print("[LOG] Processing books and their categories:")
         for book in self.data:
             category = str(book.get('category')).strip()  # Convert to string and strip whitespace
             print(f"[LOG] Book: {book['name']}, Category: '{category}'")
-            if category and category.lower() != 'all':
-                if category not in categories:
-                    categories[category] = []
+            
+            if category.lower() == 'all':
+                # Add this book to all categories
+                all_category_books.append(book)
+            elif category in categories:
                 categories[category].append(book)
         
-        # Sort categories numerically if possible
-        sorted_categories = sorted(categories.keys(), key=lambda x: int(x) if x.isdigit() else x)
+        # Add 'all' category books to each category
+        for category in categories:
+            categories[category].extend(all_category_books)
+        
+        # Sort categories numerically
+        sorted_categories = sorted(categories.keys(), key=lambda x: int(x))
         print(f"[LOG] Found categories: {sorted_categories}")
-        print(f"[LOG] Number of books per category:")
-        for cat in sorted_categories:
-            print(f"[LOG] Category {cat}: {len(categories[cat])} books")
         
         # Create category sections
         row = 0
         for category in sorted_categories:
             if categories[category]:
                 print(f"[LOG] Creating section for category: {category}")
-                # Category header
+                
+                # Books container for this category
+                books_frame = ttk.Frame(self.content_frame, style='Dark.TFrame')
+                books_frame.grid(row=row, column=0, sticky='ew', padx=20)
+                
+                # Display books horizontally
+                for i, book in enumerate(categories[category]):
+                    print(f"[LOG] Adding book {book['name']} to category {category}")
+                    self.create_book_widget(books_frame, book, 0, i)
+                
+                # Category number below books
                 category_frame = ttk.Frame(self.content_frame, style='Dark.TFrame')
-                category_frame.grid(row=row, column=0, sticky='ew', pady=(20, 0))
+                category_frame.grid(row=row + 1, column=0, sticky='ew', pady=(10, 0))
                 
                 # Large category number
                 category_label = ttk.Label(
@@ -190,20 +226,15 @@ class AppDownloader:
                 )
                 category_label.pack(side=tk.LEFT, padx=20)
                 
-                # Books container for this category
-                books_frame = ttk.Frame(self.content_frame, style='Dark.TFrame')
-                books_frame.grid(row=row + 1, column=0, sticky='ew', padx=20)
-                
-                # Display books horizontally
-                for i, book in enumerate(categories[category]):
-                    print(f"[LOG] Adding book {book['name']} to category {category}")
-                    self.create_book_widget(books_frame, book, 0, i)
-                
                 # Add separator (using tk.Frame for separator)
                 separator = tk.Frame(self.content_frame, height=2, bg='white')
                 separator.grid(row=row + 2, column=0, sticky='ew', pady=10)
                 
                 row += 3
+        
+        # Update scrollregion after adding all content
+        self.content_frame.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def download_app(self, app_data):
         try:
