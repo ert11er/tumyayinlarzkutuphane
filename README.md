@@ -10,7 +10,6 @@ All content provided through this application is freely available. The URLs in `
 - Freely available from official sources
 - Provided by respective publishers for educational purposes
 
-
 ## Description
 
 This application provides a user-friendly interface to access and download educational materials organized by grade levels (5-7). It features:
