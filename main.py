@@ -239,7 +239,9 @@ class AppDownloader:
     def download_app(self, app_data):
         try:
             url = app_data["downloadurl"]
+            unlock_key = app_data["unlockkey"]
             print(f"[LOG] Attempting to process URL: {url}")
+            
             
             # Check if URL starts with "site://"
             if url.startswith("site://"):
@@ -248,6 +250,15 @@ class AppDownloader:
                 webbrowser.open(actual_url)
                 return
             
+            # First, copy the unlock key to clipboard
+            if unlock_key == "none":
+                print(f"[LOG] Skipped copying unlock key to clipboard : no code")
+            else:
+                pyperclip.copy(unlock_key)
+                print(f"[LOG] Copied unlock key to clipboard: {unlock_key}")
+                messagebox.showinfo("Activation Key", f"Activation key '{unlock_key}' has been copied to clipboard")
+            
+
             print(f"[LOG] Starting download for: {app_data['name']}")
             response = requests.get(url, stream=True)
             
@@ -258,8 +269,11 @@ class AppDownloader:
                 os.makedirs(self.download_folder, exist_ok=True)
                 print(f"[LOG] Download folder verified: {self.download_folder}")
                 
-                # Get filename from URL
-                filename = os.path.join(self.download_folder, url.split('/')[-1])
+                # Get original filename from URL and add unlock key
+                original_filename = url.split('/')[-1]
+                base_name, extension = os.path.splitext(original_filename)
+                new_filename = f"{base_name}_{unlock_key}{extension}"
+                filename = os.path.join(self.download_folder, new_filename)
                 print(f"[LOG] Saving file as: {filename}")
                 
                 # Download the file
@@ -273,9 +287,14 @@ class AppDownloader:
                 messagebox.showinfo("Success", f"{app_data['name']} başarıyla indirildi!")
                 print(f"[LOG] Success message shown for: {app_data['name']}")
                 
-                # Open the download folder
-                print("[LOG] Opening download folder")
-                os.startfile(self.download_folder)
+                # Open the downloaded file
+                print(f"[LOG] Opening file: {filename}")
+                try:
+                    os.startfile(filename)
+                except Exception as e:
+                    print(f"[LOG] Error opening file: {e}")
+                    # If we can't open the file directly, open its folder
+                    os.startfile(self.download_folder)
             else:
                 error_msg = f"Download failed with status code: {response.status_code}"
                 print(f"[LOG] ERROR: {error_msg}")
