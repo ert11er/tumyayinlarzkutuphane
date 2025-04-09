@@ -43,7 +43,7 @@ class AppDownloader:
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Create window inside canvas
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.content, anchor="nw")
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.content, anchor="nw", width=self.master.winfo_width())
         
         # Configure canvas scrolling
         self.content.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
@@ -102,93 +102,51 @@ class AppDownloader:
 
     def create_widgets(self):
         """Create and arrange all GUI widgets."""
-        self._create_main_frame()
-        self._create_navigation()
-        self._create_book_display_area()
-        self._create_status_bar()
-
-    def _create_main_frame(self):
-        """Create the main container frame."""
-        self.main_frame = ttk.Frame(self.master, style="Dark.TFrame")
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-
-    def _create_navigation(self):
-        """Create navigation elements including home button and category tabs."""
-        # Navigation frame
-        self.nav_frame = ttk.Frame(self.main_frame, style="Dark.TFrame")
-        self.nav_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Home button
-        self.home_button = tk.Button(
-            self.nav_frame,
-            text="⌂",
-            font=('Arial', 14),
-            bg="#1E1E1E",
-            fg="white",
-            relief=tk.FLAT,
-            command=lambda: self.select_category("All")
-        )
-        self.home_button.pack(side=tk.LEFT, padx=5)
-        
-        # Category tabs container
-        self.tab_frame = ttk.Frame(self.main_frame, style="Dark.TFrame")
-        self.tab_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-
-    def _create_book_display_area(self):
-        """Create scrollable canvas for displaying books."""
-        # Canvas frame container
-        self.canvas_frame = ttk.Frame(self.main_frame, style="Dark.TFrame")
-        self.canvas_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Create canvas and scrollbar
-        self.canvas = tk.Canvas(self.canvas_frame, bg='#1E1E1E', highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.canvas_frame, orient="vertical", command=self.canvas.yview)
-        self.books_frame = ttk.Frame(self.canvas, style='Dark.TFrame')
-        
-        # Configure canvas
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Create window inside canvas
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.books_frame, anchor="nw")
-        
-        # Bind events
-        self.books_frame.bind("<Configure>", self.on_frame_configure)
-        self.canvas.bind("<Configure>", self.on_canvas_configure)
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-
-    def _create_status_bar(self):
-        """Create status bar with date and version information."""
-        self.status_frame = ttk.Frame(self.main_frame, style="Dark.TFrame")
-        self.status_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
+        # Create status bar at the bottom
+        self.status_frame = ttk.Frame(self.master, style="Dark.TFrame")
+        self.status_frame.pack(side=tk.BOTTOM, fill=tk.X)
         
         # Date label
-        self.status_label = ttk.Label(
+        self.date_label = ttk.Label(
             self.status_frame,
             text="26.03.2025",
-            foreground="white",
             background="#1E1E1E",
+            foreground="white",
             font=('Arial', 8)
         )
-        self.status_label.pack(side=tk.LEFT)
+        self.date_label.pack(side=tk.LEFT, padx=10)
         
         # Version label
         self.version_label = ttk.Label(
             self.status_frame,
             text="PERNUS",
-            foreground="white",
             background="#1E1E1E",
+            foreground="white",
             font=('Arial', 8)
         )
-        self.version_label.pack(side=tk.RIGHT)
+        self.version_label.pack(side=tk.RIGHT, padx=10)
+        
+        # Main scrollable area
+        self.canvas = tk.Canvas(self.master, bg='#1E1E1E', highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.master, orient="vertical", command=self.canvas.yview)
+        self.content = ttk.Frame(self.canvas, style='Dark.TFrame')
+        
+        # Configure scrolling
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Create window inside canvas
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.content, anchor="nw", width=self.master.winfo_width())
+        
+        # Configure canvas scrolling
+        self.content.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.canvas.bind("<Configure>", self.on_canvas_configure)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
 
     def _on_mousewheel(self, event):
         """Handle mousewheel scrolling."""
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-    def on_frame_configure(self, event=None):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def on_canvas_configure(self, event):
         # Update the width of the window inside the canvas
@@ -214,36 +172,33 @@ class AppDownloader:
             return photo_img
 
     def create_book_widget(self, parent, app_data, row, col):
-        # Main frame for the book item
+        # Book item container
         frame = ttk.Frame(parent, style='Dark.TFrame')
-        frame.grid(row=row, column=col, padx=(0, 10), pady=10)
+        frame.grid(row=row, column=col, padx=10, pady=10, sticky='ne')
         
-        # Load and display cover image
+        # Load cover image
         cover_image = self.load_cover_image_for_book(app_data["coverimageurl"])
         if cover_image:
             cover_label = ttk.Label(frame, image=cover_image, background="#1E1E1E")
             cover_label.pack()
         
-        # Red banner for INDIR button
-        button_frame = ttk.Frame(frame, style='Red.TFrame')
-        button_frame.pack(fill=tk.X)
-        
-        # Download button
+        # Red download button
         download_btn = tk.Button(
-            button_frame,
+            frame,
             text="İNDİR",
             bg="#FF4136",
             fg="white",
             font=('Arial', 10, 'bold'),
             relief=tk.FLAT,
+            width=20,  # Make button wider
             command=lambda: self.download_app(app_data)
         )
-        download_btn.pack(fill=tk.X)
+        download_btn.pack(fill=tk.X, pady=(5, 0))
 
     def display_books(self):
         print("[LOG] Starting to display books")
         # Clear existing books
-        for widget in self.books_frame.winfo_children():
+        for widget in self.content.winfo_children():
             widget.destroy()
         print("[LOG] Cleared existing book widgets")
         
@@ -269,10 +224,10 @@ class AppDownloader:
             row = i // num_columns
             col = i % num_columns
             print(f"[LOG] Creating widget for book: {app['name']} at position ({row}, {col})")
-            self.create_book_widget(self.books_frame, app, row, col)
+            self.create_book_widget(self.content, app, row, col)
         
         print("[LOG] Updating scrollbar configuration")
-        self.books_frame.update_idletasks()
+        self.content.update_idletasks()
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
         print("[LOG] Book display complete")
 
@@ -300,51 +255,56 @@ class AppDownloader:
         
         # Create category sections
         for category in categories:
-            # Create category section container
+            # Create category section frame
             section_frame = ttk.Frame(self.content, style='Dark.TFrame')
-            section_frame.pack(fill=tk.X, pady=(20, 0))
+            section_frame.pack(fill=tk.X, pady=10)
             
-            # Create large category number
+            # Left side panel for category and buttons
+            left_panel = ttk.Frame(section_frame, style='Dark.TFrame')
+            left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=10)
+            
+            # Category number (large)
             category_label = ttk.Label(
-                section_frame,
+                left_panel,
                 text=category,
                 background="#1E1E1E",
                 foreground="white",
-                font=('Arial', 36, 'bold')  # Made larger
+                font=('Arial', 48, 'bold')
             )
-            category_label.pack(anchor='w', padx=10, pady=(0, 10))
-            
-            # Create frame for top row of INDIR buttons
-            top_buttons_frame = ttk.Frame(section_frame, style='Dark.TFrame')
-            top_buttons_frame.pack(fill=tk.X, padx=10)
+            category_label.pack(anchor='w', pady=(0, 20))
             
             # Get books for this category
             category_books = [app for app in self.data if app["category"] == category]
             
-            # Create rows of INDIR buttons (10 per row)
-            buttons_per_row = 10
-            for i in range(0, len(category_books), buttons_per_row):
-                row_frame = ttk.Frame(top_buttons_frame, style='Dark.TFrame')
-                row_frame.pack(fill=tk.X, pady=(0, 5))
-                
-                # Create INDIR buttons for this row
-                for j, book in enumerate(category_books[i:i+buttons_per_row]):
-                    btn_frame = ttk.Frame(row_frame, style='Red.TFrame')
-                    btn_frame.pack(side=tk.LEFT, padx=(0, 5))
-                    
-                    btn = tk.Button(
-                        btn_frame,
-                        text="İNDİR",
-                        bg="#FF4136",
-                        fg="white",
-                        font=('Arial', 10, 'bold'),
-                        relief=tk.FLAT,
-                        command=lambda b=book: self.download_app(b)
-                    )
-                    btn.pack(padx=1, pady=1)
+            # INDIR buttons below category number
+            buttons_frame = ttk.Frame(left_panel, style='Dark.TFrame')
+            buttons_frame.pack(fill=tk.X)
             
-            # Add white separator line
-            separator = ttk.Frame(section_frame, height=2, style='Separator.TFrame')
+            # Create INDIR buttons in the left panel
+            for i, book in enumerate(category_books):
+                btn = tk.Button(
+                    buttons_frame,
+                    text="İNDİR",
+                    bg="#FF4136",
+                    fg="white",
+                    font=('Arial', 10, 'bold'),
+                    relief=tk.FLAT,
+                    command=lambda b=book: self.download_app(b)
+                )
+                btn.pack(side=tk.LEFT, padx=(0, 5), pady=2)
+            
+            # Right side panel for book displays
+            right_panel = ttk.Frame(section_frame, style='Dark.TFrame')
+            right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10)
+            
+            # Display books in a grid (2 columns)
+            for i, book in enumerate(category_books):
+                col = i % 2
+                row = i // 2
+                self.create_book_widget(right_panel, book, row, col)
+            
+            # Add white separator line at the bottom
+            separator = ttk.Frame(section_frame, height=1, style='Separator.TFrame')
             separator.pack(fill=tk.X, pady=(20, 0))
 
     def download_app(self, app_data):
