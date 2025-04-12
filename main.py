@@ -153,14 +153,14 @@ class AppDownloader:
                     response = requests.get(url, timeout=10)
                     response.raise_for_status()  # Raise an error for bad status codes
                     
-            img_data = response.content
-            img = Image.open(io.BytesIO(img_data))
+                    img_data = response.content
+                    img = Image.open(io.BytesIO(img_data))
                     
                     # Convert to RGBA to ensure compatibility
                     img = img.convert('RGBA')
                     
                     # Resize image
-            img = img.resize(size, Image.Resampling.LANCZOS)
+                    img = img.resize(size, Image.Resampling.LANCZOS)
                     
                     # Save to cache
                     img.save(cache_path, 'PNG')
@@ -238,10 +238,13 @@ class AppDownloader:
         
         # Update label with actual image
         def update_image():
-            cover_image = self.get_cached_image(app_data["coverimageurl"], size=(150, 200))
-        if cover_image:
-                cover_label.configure(image=cover_image)
-                cover_label.image = cover_image  # Keep a reference
+            try:
+                cover_image = self.get_cached_image(app_data["coverimageurl"], size=(150, 200))
+                if cover_image:
+                    cover_label.configure(image=cover_image)
+                    cover_label.image = cover_image  # Keep a reference
+            except Exception as e:
+                print(f"[LOG] Error updating image: {e}")
         
         # Schedule image loading
         self.master.after(10, update_image)
