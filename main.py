@@ -377,22 +377,39 @@ def logout():
 def index():
     """Main route to display the books, requires login."""
     if not session.get('logged_in'):
-        return redirect(url_for('login')) # If not logged in, go to login page
+        return redirect(url_for('login'))
 
-    # --- If logged in, proceed to generate the main page ---
-    categories = {'5': [], '6': [], '7': []}
-    all_category_books = []
+    # --- Process data for display (group by category) ---
+    # Initialize categories including 'all' explicitly
+    categories = {'5': [], '6': [], '7': [], 'all': []} 
+    # No longer need separate all_category_books list
+
     for book in book_data:
-        category = book.get('category', '')
-        if category.lower() == 'all':
-            all_category_books.append(book)
-        elif category in categories:
+        category = book.get('category', '').lower() # Normalize to lowercase
+        
+        # Directly assign to the 'all' category if it matches
+        if category == 'all':
+            categories['all'].append(book)
+        # Assign to numbered categories if they exist
+        elif category in categories: 
             categories[category].append(book)
-    for category_key in categories:
-        categories[category_key].extend(all_category_books)
-    valid_categories = {k: v for k, v in categories.items() if v}
-    sorted_category_keys = sorted(valid_categories.keys(), key=lambda x: int(x))
+        # Optional: You could have an 'unknown' or default category here if needed
+        # else:
+        #    # Handle books with categories other than 5, 6, 7, or all if necessary
+        #    pass 
 
+    # --- Filter out empty categories ---
+    valid_categories = {k: v for k, v in categories.items() if v}
+
+    # --- Sort categories: Numbers first, then 'all' last ---
+    numeric_keys = sorted([k for k in valid_categories if k.isdigit()], key=int)
+    
+    # Build the final sorted list
+    sorted_category_keys = numeric_keys
+    if 'all' in valid_categories:
+        sorted_category_keys.append('all') # Add 'all' category key at the end
+
+    # Generate the full HTML using the processed data and sorted keys
     html_content = generate_main_html(valid_categories, sorted_category_keys)
     return html_content
 
