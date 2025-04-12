@@ -259,20 +259,17 @@ def generate_main_html(categories_data, sorted_keys):
     <div id="status-message" class="status-message"></div> <!-- Added for feedback -->
     <script>
         async function copyToClipboard(text) {{
-            if (!text || text.toLowerCase() === 'none') return Promise.resolve(); // Return resolved promise
+            if (!text || text.toLowerCase() === 'none') return Promise.resolve();
             try {{
                 await navigator.clipboard.writeText(text);
                 console.log('Activation key copied to clipboard.');
-                // Optional: show temporary feedback instead of alert
-                // showStatusMessage('Aktivasyon Anahtarı Panoya Kopyalandı', 2000); 
             }} catch (err) {{
                 console.error('Clipboard copy failed: ', err);
                 alert('Anahtar kopyalanamadı.');
-                return Promise.reject(err); // Propagate error if needed
+                return Promise.reject(err);
             }}
         }}
 
-        // Display temporary status messages
         function showStatusMessage(message, duration = 3000) {{
             const statusElement = document.getElementById('status-message');
             if (statusElement) {{
@@ -284,40 +281,32 @@ def generate_main_html(categories_data, sorted_keys):
             }}
         }}
 
-        // Renamed function, now calls the backend route
         async function handleServerDownload(actionUrl, unlockKey) {{
-            showStatusMessage('İndirme ve çalıştırma başlatılıyor...'); // Immediate feedback
+            showStatusMessage('İndirme ve çalıştırma başlatılıyor...');
             try {{
-                // Copy key first (await ensures it attempts before fetch)
-                await copyToClipboard(unlockKey); 
+                await copyToClipboard(unlockKey);
+                const response = await fetch(actionUrl);
 
-                // Fetch the backend route which triggers download and run
-                const response = await fetch(actionUrl); 
-                
-                // Check if the server responded ok (2xx status code)
                 if (!response.ok) {{
-                    // Try to get error message from server if available
-                    let errorMsg = `Server error: ${response.status}`;
+                    let errorMsg = 'Server error: ' + response.status;
                     try {{
                         const errorData = await response.json();
                         errorMsg = errorData.error || errorMsg;
-                    }} catch (e) {{ /* Ignore if response is not JSON */ }}
-                    throw new Error(errorMsg); // Throw error to be caught below
+                    }} catch (e) {{ /* Ignore */ }}
+                    throw new Error(errorMsg);
                 }}
 
-                // Get response (expecting JSON)
-                const result = await response.json(); 
+                const result = await response.json();
 
-                // Display success or error message from server
                 if (result.status === 'success') {{
                     showStatusMessage(result.message || 'İşlem başarılı.', 5000);
                 }} else {{
-                    showStatusMessage(`Hata: ${result.error || 'Bilinmeyen sunucu hatası.'}`, 5000);
+                    showStatusMessage('Hata: ' + (result.error || 'Bilinmeyen sunucu hatası.'), 5000);
                 }}
 
             }} catch (error) {{
                 console.error('Failed to trigger server download/run:', error);
-                showStatusMessage(`İstek başarısız: ${error.message}`, 5000);
+                showStatusMessage('İstek başarısız: ' + error.message, 5000);
             }}
         }}
     </script>
@@ -438,11 +427,17 @@ def download_and_run():
         response.raise_for_status()
         # --- Prepare filename ---
         try:
+            # Try to get filename from headers first
             content_disposition = response.headers.get('content-disposition')
             if content_disposition:
-                 import cgi; value, params = cgi.parse_header(content_disposition)
+                 # Parses header like 'attachment; filename="filename.jpg"'
+                 import cgi # Note: Consider moving this import to the top of the file
+                 value, params = cgi.parse_header(content_disposition)
                  original_filename = params.get('filename')
-            else original_filename = None
+            else: # Corrected line
+                 original_filename = None # Corrected line (indented under else)
+            
+            # Fallback to parsing URL if header not present or doesn't have filename
             if not original_filename:
                 parsed_url = urllib.parse.urlparse(download_url)
                 original_filename = os.path.basename(parsed_url.path) if parsed_url.path else "downloaded_file"
