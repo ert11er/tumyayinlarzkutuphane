@@ -2,551 +2,490 @@ import csv
 import os
 import requests
 import subprocess
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
-from PIL import Image, ImageTk
-import io
-import webbrowser
-import pyperclip
+# Remove Tkinter imports
+# import tkinter as tk
+# from tkinter import ttk
+# from tkinter import messagebox
+from PIL import Image # Keep for placeholder creation
+# from PIL import ImageTk # Remove Tkinter-specific image type
+# import io # Remove
+# import webbrowser # Remove
+# import pyperclip # Remove
 import hashlib
+from flask import Flask, abort, g, send_from_directory, request, jsonify, Response, stream_with_context, session, redirect, url_for, flash, render_template_string
+from markupsafe import Markup
+import urllib.parse # To encode URL for passing as parameter
+import random # For password generation
+import string # For password generation
 
-class AppDownloader:
+# --- REMOVE THE ENTIRE AppDownloader Class Definition ---
+# class AppDownloader:
+#     """
+#     A GUI application for downloading educational content from a digital library.
+#     Displays books organized by category with cover images and download buttons.
+#     """
+#     
+#     def __init__(self, master):
+#         # ... ALL THE WAY DOWN TO ...
+#         messagebox.showerror("Error", error_msg)
+# --- END OF AppDownloader Class Removal ---
+
+
+# --- Configuration (Should be near the top now) ---
+DATA_FILE = "data.csv"
+GITHUB_DATA_URL = "https://raw.githubusercontent.com/ert11er/tumyayinlarzkutuphane/main/data.csv"
+DOWNLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "data")
+STATIC_FOLDER = os.path.join(os.path.dirname(__file__), "static")
+
+# Ensure directories exist
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+os.makedirs(STATIC_FOLDER, exist_ok=True)
+# Create a placeholder image if it doesn't exist
+placeholder_path = os.path.join(STATIC_FOLDER, "placeholder.png")
+if not os.path.exists(placeholder_path):
+    try:
+        # Use the imported Image from PIL
+        img = Image.new('RGBA', (150, 200), color='#444')
+        img.save(placeholder_path)
+        print("[LOG] Created placeholder.png")
+    except NameError: # Catch if PIL wasn't imported or failed
+         print("[LOG] Warning: PIL/Pillow not installed or failed. Cannot create placeholder image.")
+    except Exception as e:
+        print(f"[LOG] Error creating placeholder: {e}")
+
+
+# --- Flask App Initialization ---
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.urandom(24) # Generate a random secret key each run
+
+# --- Password Generation ---
+# Generate a 5-digit random password ONCE at startup
+LOGIN_PASSWORD = "".join(random.choices(string.digits, k=5))
+print("*" * 40)
+print(f"ACCESS PASSWORD: {LOGIN_PASSWORD}")
+print("*" * 40)
+# Store it in app config for easy access within routes (optional but clean)
+app.config['LOGIN_PASSWORD'] = LOGIN_PASSWORD
+
+# --- Data Loading Functions (Now defined AFTER constants) ---
+def load_data_from_csv(filename=DATA_FILE): # DATA_FILE is now defined before this line
+    """Loads book data from the CSV file."""
+    data = []
+    try:
+        with open(filename, "r", newline="", encoding="utf-8") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                data.append({
+                    'name': row.get('name', 'N/A').strip(),
+                    'downloadurl': row.get('downloadurl', '').strip(),
+                    'unlockkey': row.get('unlockkey', 'none').strip(),
+                    'category': str(row.get('category', '')).strip(),
+                    'publisher': row.get('publisher', 'N/A').strip(),
+                    'coverimageurl': row.get('coverimageurl', '').strip()
+                })
+        print(f"[LOG] Loaded {len(data)} items from {filename}")
+        return data
+    except FileNotFoundError:
+        print(f"[LOG] ERROR: Data file '{filename}' not found.")
+        return []
+    except Exception as e:
+        print(f"[LOG] EXCEPTION loading data: {e}")
+        return []
+
+def check_and_update_data():
+    """Checks for data file updates from GitHub (Simplified)."""
+    if not os.path.exists(DATA_FILE):
+        print(f"[LOG] Local data file '{DATA_FILE}' not found. Attempting download...")
+        try:
+            response = requests.get(GITHUB_DATA_URL, timeout=10)
+            response.raise_for_status() # Raise error for bad status
+            with open(DATA_FILE, "w", encoding="utf-8") as file:
+                file.write(response.text)
+            print("[LOG] Data file successfully downloaded.")
+        except requests.exceptions.RequestException as e:
+             print(f"[LOG] Error downloading data file: {e}")
+        except Exception as e:
+             print(f"[LOG] Error writing data file: {e}")
+
+
+# Load data when the application starts
+check_and_update_data()
+book_data = load_data_from_csv()
+
+# --- HTML Structure (as Python strings/functions) ---
+
+def generate_book_card_html(book):
+    """Generates HTML for a single book card."""
+    # Basic fallback logic for images
+    image_url = book.get('coverimageurl', '') or '/static/placeholder.png'
+    image_alt = f"{book.get('name', 'Book')} Cover"
+    placeholder_url = '/static/placeholder.png'
+    # Use Markup to prevent accidental HTML injection from data
+    book_name = Markup.escape(book.get('name', 'N/A'))
+    publisher = Markup.escape(book.get('publisher', 'N/A'))
+    download_url = book.get('downloadurl', '')
+    unlock_key = book.get('unlockkey', 'none') # Get raw key for logic
+    js_unlock_key = Markup.escape(unlock_key) # Escape for JS
+
+    # Button Logic
+    button_html = ""
+    if download_url:
+        if download_url.startswith('site://'):
+            site_url = Markup.escape(download_url[7:])
+            button_html = f'<a href="{site_url}" target="_blank" class="download-button">SİTEYE GİT</a>'
+        else:
+            # Encode the download URL to safely pass it as a query parameter
+            encoded_url = urllib.parse.quote_plus(download_url)
+            encoded_key = urllib.parse.quote_plus(unlock_key)
+            # Link to the new server-side download route
+            action_url = f"/download-and-run?url={encoded_url}&key={encoded_key}"
+            button_html = f'''<a href="{action_url}"
+                               target="_blank" 
+                               class="download-button"
+                               onclick="handleServerDownload(this.href, \'{js_unlock_key}\'); return false;">
+                               İNDİR & ÇALIŞTIR
+                            </a>''' # Changed text slightly
+    else:
+        button_html = '<span class="download-button" style="background-color: grey; cursor: default;">MEVCUT DEĞİL</span>'
+
+    return f"""
+    <div class="book-card">
+        <div class="book-cover">
+            <img src="{image_url}"
+                 alt="{image_alt}"
+                 onerror="this.onerror=null; this.src='{placeholder_url}';">
+        </div>
+        <div class="book-info">
+            <div class="name">{book_name}</div>
+            <div class="publisher">{publisher}</div>
+        </div>
+        {button_html}
+    </div>
     """
-    A GUI application for downloading educational content from a digital library.
-    Displays books organized by category with cover images and download buttons.
+
+def generate_category_section_html(category_key, category_books):
+    """Generates HTML for a category section, including its books."""
+    if not category_books:
+        return ""
+
+    # Generate HTML for all book cards in this category
+    books_html = "".join(generate_book_card_html(book) for book in category_books)
+
+    category_header = Markup.escape(category_key)
+
+    return f"""
+    <div class="category-section">
+        <div class="books-container">
+            {books_html}
+        </div>
+         <div class="category-header">{category_header}</div>
+    </div>
     """
+
+def generate_main_html(categories_data, sorted_keys):
+    """Generates the complete HTML page FOR LOGGED IN USERS."""
+
+    # Generate HTML for all category sections
+    all_categories_html = "".join(
+        generate_category_section_html(key, categories_data.get(key, []))
+        for key in sorted_keys
+    )
+
+    # Add a logout button
+    logout_button = '<div style="text-align: center; margin: 20px;"><a href="/logout" style="color: #FF4136; text-decoration: none; border: 1px solid #FF4136; padding: 5px 10px; border-radius: 3px;">Çıkış Yap</a></div>'
+
+    # Embed everything into the main HTML structure
+    return f"""
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TÜM Yayınlar Z-Kütüphane</title>
+    <style>
+        body {{
+            background-color: #1E1E1E; color: white;
+            font-family: Arial, sans-serif; margin: 0; padding: 0;
+        }}
+        .category-section {{
+            margin: 20px; padding-bottom: 10px;
+            border-bottom: 2px solid white;
+        }}
+        .category-header {{
+            font-size: 2em; font-weight: bold;
+            margin-bottom: 15px; padding-left: 10px;
+        }}
+        .books-container {{
+            display: flex; overflow-x: auto; padding-bottom: 15px;
+            gap: 15px; min-height: 330px;
+        }}
+        .books-container::-webkit-scrollbar {{ height: 10px; }}
+        .books-container::-webkit-scrollbar-track {{ background: #555; border-radius: 5px; }}
+        .books-container::-webkit-scrollbar-thumb {{ background: #888; border-radius: 5px; }}
+        .books-container::-webkit-scrollbar-thumb:hover {{ background: #aaa; }}
+        .book-card {{
+            background-color: #2E2E2E; border-radius: 5px; padding: 10px;
+            width: 170px; flex-shrink: 0; text-align: center;
+            display: flex; flex-direction: column; justify-content: space-between;
+        }}
+        .book-cover img {{
+            width: 150px; height: 200px; object-fit: cover;
+            background-color: #444; display: block; margin: 0 auto 10px auto;
+        }}
+        .book-info .name {{ font-size: 0.9em; margin-bottom: 5px; min-height: 2.4em; }}
+        .book-info .publisher {{ font-size: 0.75em; color: gray; margin-bottom: 10px; min-height: 1.2em; }}
+        .download-button {{
+            display: block; background-color: #FF4136; color: white;
+            padding: 8px 0; border: none; border-radius: 3px;
+            text-decoration: none; font-weight: bold; cursor: pointer; margin-top: auto;
+        }}
+        .download-button:hover {{ opacity: 0.9; }}
+        footer {{
+            padding: 10px 20px; font-size: 0.8em; color: gray;
+            display: flex; justify-content: space-between; margin-top: 20px;
+        }}
+        .status-message {{ position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); background-color: rgba(0,0,0,0.7); color: white; padding: 10px 20px; border-radius: 5px; z-index: 1000; display: none; }} /* Added for feedback */
+    </style>
+</head>
+<body>
+    <h1 style="text-align: center; margin-top: 20px;">TÜM Yayınlar Z-Kütüphane</h1>
+    {logout_button} 
+    {all_categories_html}
+    <footer>
+        <span>26.03.2025</span> <!-- Placeholder date -->
+        <span>PERNUS</span> <!-- Placeholder version -->
+    </footer>
+
+    <div id="status-message" class="status-message"></div> <!-- Added for feedback -->
+    <script>
+        async function copyToClipboard(text) {{
+            if (!text || text.toLowerCase() === 'none') return Promise.resolve(); // Return resolved promise
+            try {{
+                await navigator.clipboard.writeText(text);
+                console.log('Activation key copied to clipboard.');
+                // Optional: show temporary feedback instead of alert
+                // showStatusMessage('Aktivasyon Anahtarı Panoya Kopyalandı', 2000); 
+            }} catch (err) {{
+                console.error('Clipboard copy failed: ', err);
+                alert('Anahtar kopyalanamadı.');
+                return Promise.reject(err); // Propagate error if needed
+            }}
+        }}
+
+        // Display temporary status messages
+        function showStatusMessage(message, duration = 3000) {{
+            const statusElement = document.getElementById('status-message');
+            if (statusElement) {{
+                statusElement.textContent = message;
+                statusElement.style.display = 'block';
+                setTimeout(() => {{
+                    statusElement.style.display = 'none';
+                }}, duration);
+            }}
+        }}
+
+        // Renamed function, now calls the backend route
+        async function handleServerDownload(actionUrl, unlockKey) {{
+            showStatusMessage('İndirme ve çalıştırma başlatılıyor...'); // Immediate feedback
+            try {{
+                // Copy key first (await ensures it attempts before fetch)
+                await copyToClipboard(unlockKey); 
+
+                // Fetch the backend route which triggers download and run
+                const response = await fetch(actionUrl); 
+                
+                // Check if the server responded ok (2xx status code)
+                if (!response.ok) {{
+                    // Try to get error message from server if available
+                    let errorMsg = `Server error: ${response.status}`;
+                    try {{
+                        const errorData = await response.json();
+                        errorMsg = errorData.error || errorMsg;
+                    }} catch (e) {{ /* Ignore if response is not JSON */ }}
+                    throw new Error(errorMsg); // Throw error to be caught below
+                }}
+
+                // Get response (expecting JSON)
+                const result = await response.json(); 
+
+                // Display success or error message from server
+                if (result.status === 'success') {{
+                    showStatusMessage(result.message || 'İşlem başarılı.', 5000);
+                }} else {{
+                    showStatusMessage(`Hata: ${result.error || 'Bilinmeyen sunucu hatası.'}`, 5000);
+                }}
+
+            }} catch (error) {{
+                console.error('Failed to trigger server download/run:', error);
+                showStatusMessage(`İstek başarısız: ${error.message}`, 5000);
+            }}
+        }}
+    </script>
+</body>
+</html>
+    """
+
+# Simple HTML template for the login page
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Giriş Yap</title>
+    <style>
+        body { background-color: #1E1E1E; color: white; font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .login-box { background-color: #2E2E2E; padding: 30px; border-radius: 8px; text-align: center; }
+        input[type=password] { padding: 10px; margin-top: 10px; margin-bottom: 20px; border: 1px solid #555; border-radius: 4px; background-color: #444; color: white; }
+        input[type=submit] { padding: 10px 20px; border: none; border-radius: 4px; background-color: #FF4136; color: white; font-weight: bold; cursor: pointer; }
+        input[type=submit]:hover { opacity: 0.9; }
+        .flash-error { color: #FF4136; margin-bottom: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h2>Giriş Gerekli</h2>
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <div class="flash-error">{{ messages[0] }}</div>
+            {% endif %}
+        {% endwith %}
+        <form method="post">
+            <label for="password">Şifre:</label><br>
+            <input type="password" id="password" name="password" required autofocus><br>
+            <input type="submit" value="Giriş Yap">
+        </form>
+    </div>
+</body>
+</html>
+"""
+
+# --- Routes ---
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Handles user login."""
+    if request.method == 'POST':
+        entered_password = request.form.get('password')
+        correct_password = app.config['LOGIN_PASSWORD'] # Get password stored at startup
+        if entered_password == correct_password:
+            session['logged_in'] = True # Mark session as logged in
+            flash('Giriş başarılı!', 'success') # Optional success message
+            return redirect(url_for('index')) # Redirect to main page
+        else:
+            flash('Yanlış şifre.', 'error') # Show error message
+            return redirect(url_for('login')) # Redirect back to login page
     
-    def __init__(self, master):
-        self.master = master
-        self.setup_window()
-        self.initialize_variables()
-        self.setup_styles()
-        self.create_widgets()
-        self.check_data_file()
-        self.load_data()
+    # If GET request or failed POST, show the login form
+    return render_template_string(LOGIN_TEMPLATE)
 
-    def setup_window(self):
-        """Configure the main window settings."""
-        self.master.title("TÜM Yayinlar Z-Kütüphane")
-        self.master.configure(bg='#1E1E1E')
-        self.master.state('zoomed')
+@app.route('/logout')
+def logout():
+    """Logs the user out."""
+    session.pop('logged_in', None) # Clear the session flag
+    flash('Başarıyla çıkış yapıldı.', 'info') # Optional message
+    return redirect(url_for('login')) # Redirect to login page
 
-    def initialize_variables(self):
-        """Initialize instance variables and constants."""
-        # File paths and URLs
-        self.data_file = "data.csv"
-        self.github_data_url = "https://raw.githubusercontent.com/ert11er/tumyayinlarzkutuphane/main/data.csv"
-        self.download_folder = os.path.join(os.path.dirname(__file__), "data")
-        self.assets_folder = os.path.join(os.path.dirname(__file__), "assets")
-        
-        # Ensure required directories exist
-        os.makedirs(self.download_folder, exist_ok=True)
-        os.makedirs(self.assets_folder, exist_ok=True)
-        
-        # Data storage
-        self.data = []
-        self.images = {}  # Store image cache with URLs as keys
-        self.category_filter = tk.StringVar(value="All")
-        
-        print("[LOG] Initialized variables and created necessary directories")
+@app.route('/')
+def index():
+    """Main route to display the books, requires login."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login')) # If not logged in, go to login page
 
-    def setup_styles(self):
-        """Configure ttk styles for widgets."""
-        self.style = ttk.Style()
-        self.style.configure("Dark.TFrame", background='#1E1E1E')
-        self.style.configure("Red.TFrame", background='#FF4136')
-        self.style.configure("Dark.TLabel", background='#1E1E1E', foreground='white')
-        self.style.configure("Category.TLabel", background='#1E1E1E', foreground='white', font=('Arial', 24, 'bold'))
+    # --- If logged in, proceed to generate the main page ---
+    categories = {'5': [], '6': [], '7': []}
+    all_category_books = []
+    for book in book_data:
+        category = book.get('category', '')
+        if category.lower() == 'all':
+            all_category_books.append(book)
+        elif category in categories:
+            categories[category].append(book)
+    for category_key in categories:
+        categories[category_key].extend(all_category_books)
+    valid_categories = {k: v for k, v in categories.items() if v}
+    sorted_category_keys = sorted(valid_categories.keys(), key=lambda x: int(x))
 
-    def create_widgets(self):
-        """Create and arrange all GUI widgets."""
-        # Create status bar at the bottom
-        self.status_frame = ttk.Frame(self.master, style="Dark.TFrame")
-        self.status_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        # Date label
-        self.date_label = ttk.Label(
-            self.status_frame,
-            text="26.03.2025",
-            style="Dark.TLabel",
-            font=('Arial', 8)
-        )
-        self.date_label.pack(side=tk.LEFT, padx=10)
-        
-        # Version label
-        self.version_label = ttk.Label(
-            self.status_frame,
-            text="PERNUS",
-            style="Dark.TLabel",
-            font=('Arial', 8)
-        )
-        self.version_label.pack(side=tk.RIGHT, padx=10)
-        
-        # Create a frame to hold the canvas and scrollbar
-        self.canvas_frame = ttk.Frame(self.master)
-        self.canvas_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        
-        # Main scrollable area
-        self.canvas = tk.Canvas(self.canvas_frame, bg='#1E1E1E', highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(self.canvas_frame, orient="vertical", command=self.canvas.yview)
-        
-        # Configure scrolling
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-        
-        # Pack scrollbar and canvas
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Main content frame
-        self.content_frame = ttk.Frame(self.canvas, style='Dark.TFrame')
-        
-        # Create window inside canvas
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.content_frame, anchor="nw")
-        
-        # Configure canvas scrolling
-        self.content_frame.bind("<Configure>", self._on_frame_configure)
-        self.canvas.bind("<Configure>", self.on_canvas_configure)
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+    html_content = generate_main_html(valid_categories, sorted_category_keys)
+    return html_content
 
-    def _on_frame_configure(self, event=None):
-        """Reset the scroll region to encompass the inner frame"""
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
-    def _on_mousewheel(self, event):
-        """Handle mousewheel scrolling"""
-        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-    def on_canvas_configure(self, event):
-        """Update canvas window width when canvas is resized."""
-        self.canvas.itemconfig(self.canvas_window, width=event.width)
-
-    def get_cached_image(self, url, size=(180, 250), max_retries=3):
-        """Get image from cache or download and cache it with retry mechanism."""
-        if not url:
-            # Pass size but not url to placeholder creation when url is empty
-            return self.create_placeholder_image(size=size) 
-            
-        # Create hash of URL for filename
-        url_hash = hashlib.md5(url.encode()).hexdigest()
-        cache_path = os.path.join(self.assets_folder, f"{url_hash}.png")
-        
-        # If we already have this image in memory, return it
-        if url in self.images:
-            print(f"[LOG] Using memory-cached image for: {url}")
-            return self.images[url]
-        
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    """Serves static files (placeholder image). No login required."""
+    if filename == "placeholder.png":
         try:
-            # Check if image exists in cache
-            if os.path.exists(cache_path):
-                print(f"[LOG] Loading disk-cached image for: {url}")
-                try:
-                    img = Image.open(cache_path)
-                    img = img.convert('RGBA')  # Convert to RGBA to ensure compatibility
-                    photo_img = ImageTk.PhotoImage(img)
-                    self.images[url] = photo_img
-                    return photo_img
-                except Exception as e:
-                    print(f"[LOG] Error loading cached image, will try downloading again: {e}")
-            
-            # If not in cache, try downloading with retries
-            for attempt in range(max_retries):
-                try:
-                    print(f"[LOG] Downloading image (attempt {attempt + 1}/{max_retries}): {url}")
-                    response = requests.get(url, timeout=10)
-                    response.raise_for_status()
-                    
-                    img_data = response.content
-                    img = Image.open(io.BytesIO(img_data))
-                    img = img.convert('RGBA')
-                    img = img.resize(size, Image.Resampling.LANCZOS)
-                    
-                    # Save to cache
-                    img.save(cache_path, 'PNG')
-                    print(f"[LOG] Saved image to cache: {cache_path}")
-                    
-                    # Create PhotoImage and store in memory
-                    photo_img = ImageTk.PhotoImage(img)
-                    self.images[url] = photo_img
-                    return photo_img
-                    
-                except requests.exceptions.RequestException as e:
-                    print(f"[LOG] Download attempt {attempt + 1} failed: {e}")
-                    if attempt == max_retries - 1:
-                        raise
-            
-            # If download loop finishes without returning/raising, create placeholder
-            print(f"[LOG] Failed to download image after {max_retries} attempts for: {url}")
-            return self.create_placeholder_image(size=size) # Pass size only
-            
-        except Exception as e:
-            print(f"[LOG] ERROR loading image from {url}: {e}")
-            # Pass size only in final exception handler
-            return self.create_placeholder_image(size=size) 
-
-    def create_placeholder_image(self, size=(180, 250), url=None):
-        """Create a placeholder image with error text."""
-        # The url parameter is kept here for potential future use or debugging, 
-        # but we don't strictly need it based on the calls above.
-        try:
-            print(f"[LOG] Creating placeholder image for: {url}")
-            # Create a new image with a dark background
-            img = Image.new('RGBA', size, color='#2E2E2E')
-            
-            # Add some error text to the placeholder
-            from PIL import ImageDraw, ImageFont
-            draw = ImageDraw.Draw(img)
-            
-            # Add error icon or symbol
-            error_text = "!"
-            # Try to get a font, fall back to default if not available
-            try:
-                font = ImageFont.truetype("arial.ttf", 40)
-            except:
-                font = ImageFont.load_default()
-            
-            # Center the text
-            text_bbox = draw.textbbox((0, 0), error_text, font=font)
-            text_width = text_bbox[2] - text_bbox[0]
-            text_height = text_bbox[3] - text_bbox[1]
-            x = (size[0] - text_width) // 2
-            y = (size[1] - text_height) // 2
-            
-            # Draw the error symbol
-            draw.text((x, y), error_text, fill='#FF4136', font=font)
-            
-            # Create PhotoImage and store in memory
-            photo_img = ImageTk.PhotoImage(img)
-            if url:
-                self.images[url] = photo_img
-            return photo_img
-            
-        except Exception as e:
-            print(f"[LOG] ERROR creating placeholder image: {e}")
-            # If everything fails, create a basic colored rectangle
-            img = Image.new('RGBA', size, color='#FF4136')
-            photo_img = ImageTk.PhotoImage(img)
-            if url:
-                self.images[url] = photo_img
-            return photo_img
-
-    def create_book_widget(self, parent, app_data, row, col, i):
-        """Create a widget for a single book."""
-        # Book frame
-        frame = ttk.Frame(parent, style='Dark.TFrame')
-        frame.grid(row=row, column=col, padx=5, pady=5)
-        
-        # Load cover image with loading indicator
-        placeholder_size = (150, 200) 
-        loading_placeholder = self.create_placeholder_image(size=placeholder_size)
-        cover_label = tk.Label(frame, image=loading_placeholder, bg="#1E1E1E")
-        cover_label.pack()
-        
-        # Update label with actual image
-        def update_image():
-            try:
-                if "coverimageurl" in app_data and app_data["coverimageurl"]:
-                    cover_image = self.get_cached_image(app_data["coverimageurl"], size=placeholder_size) 
-                    if cover_image:
-                        cover_label.configure(image=cover_image)
-                        cover_label.image = cover_image  # Keep a reference
-            except Exception as e:
-                print(f"[LOG] Error updating image: {e}")
-        
-        # Schedule image loading with staggered delay based on index 'i'
-        stagger_delay_ms = 100 + i * 50 # Base 100ms + 50ms per book index
-        self.master.after(stagger_delay_ms, update_image) 
-        
-        # Book information
-        info_frame = ttk.Frame(frame, style='Dark.TFrame')
-        info_frame.pack(fill=tk.X, pady=(5, 5))
-        
-        # Book name
-        name_label = tk.Label(
-            info_frame,
-            text=app_data["name"],
-            bg="#1E1E1E",
-            fg="white",
-            wraplength=150,
-            justify=tk.CENTER
-        )
-        name_label.pack()
-        
-        # Publisher info
-        publisher_label = tk.Label(
-            info_frame,
-            text=app_data["publisher"],
-            bg="#1E1E1E",
-            fg="gray",
-            font=('Arial', 8),
-            wraplength=150
-        )
-        publisher_label.pack()
-        
-        # Download button
-        button_frame = ttk.Frame(frame, style='Red.TFrame')
-        button_frame.pack(fill=tk.X)
-        
-        download_btn = tk.Button(
-            button_frame,
-            text="İNDİR",
-            bg="#FF4136",
-            fg="white",
-            font=('Arial', 10, 'bold'),
-            relief=tk.FLAT,
-            command=lambda: self.download_app(app_data)
-        )
-        download_btn.pack(fill=tk.X)
-
-    def display_books(self):
-        """Display books organized by categories."""
-        print("[LOG] Starting to display books")
-        # Clear existing content
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
-        
-        # Extract unique categories from data
-        categories = {'5': [], '6': [], '7': []}  # Initialize all categories
-        all_category_books = []  # Store books with 'all' category
-        
-        print("[LOG] Processing books and their categories:")
-        for book in self.data:
-            category = str(book.get('category')).strip()  # Convert to string and strip whitespace
-            print(f"[LOG] Book: {book['name']}, Category: '{category}'")
-            
-            if category.lower() == 'all':
-                # Add this book to all categories
-                all_category_books.append(book)
-            elif category in categories:
-                categories[category].append(book)
-        
-        # Add 'all' category books to each category
-        for category in categories:
-            categories[category].extend(all_category_books)
-        
-        # Sort categories numerically
-        sorted_categories = sorted(categories.keys(), key=lambda x: int(x))
-        print(f"[LOG] Found categories: {sorted_categories}")
-        
-        # Create category sections
-        row = 0
-        for category in sorted_categories:
-            if categories[category]:
-                print(f"[LOG] Creating section for category: {category}")
-                
-                # Create a frame for the category
-                category_container = ttk.Frame(self.content_frame, style='Dark.TFrame')
-                category_container.grid(row=row, column=0, sticky='ew', padx=20)
-                category_container.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
-                
-                # Create a canvas for horizontal scrolling
-                books_canvas = tk.Canvas(category_container, bg='#1E1E1E', highlightthickness=0, height=350)  # Set fixed height
-                books_canvas.pack(side=tk.TOP, fill=tk.X, expand=True)
-                
-                # Create horizontal scrollbar
-                h_scrollbar = ttk.Scrollbar(category_container, orient=tk.HORIZONTAL, command=books_canvas.xview)
-                h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-                
-                # Configure canvas
-                books_canvas.configure(xscrollcommand=h_scrollbar.set)
-                
-                # Create frame for books inside canvas
-                books_frame = ttk.Frame(books_canvas, style='Dark.TFrame')
-                canvas_window = books_canvas.create_window((0, 0), window=books_frame, anchor="nw")
-                
-                # Configure books frame to update scrollregion when its size changes
-                def on_books_frame_configure(event):
-                    books_canvas.configure(scrollregion=books_canvas.bbox("all"))
-                
-                books_frame.bind('<Configure>', on_books_frame_configure)
-                
-                # Display books horizontally, passing the index 'i'
-                for i, book in enumerate(categories[category]):
-                    print(f"[LOG] Adding book {book['name']} to category {category}")
-                    # Pass index 'i' to the widget creation function
-                    self.create_book_widget(books_frame, book, 0, i, i) 
-                
-                # Update canvas scroll region initially after adding books
-                # This might be redundant due to the binding, but can help ensure initial state
-                books_frame.update_idletasks() 
-                books_canvas.configure(scrollregion=books_canvas.bbox("all"))
-                
-                # Category number below books
-                category_frame = ttk.Frame(self.content_frame, style='Dark.TFrame')
-                category_frame.grid(row=row + 1, column=0, sticky='ew', pady=(10, 0))
-                
-                # Large category number
-                category_label = ttk.Label(
-                    category_frame,
-                    text=category,
-                    style="Category.TLabel"
-                )
-                category_label.pack(side=tk.LEFT, padx=20)
-                
-                # Add separator (using tk.Frame for separator)
-                separator = tk.Frame(self.content_frame, height=2, bg='white')
-                separator.grid(row=row + 2, column=0, sticky='ew', pady=10)
-                
-                row += 3
-        
-        # Update scrollregion after adding all content
-        self.content_frame.update_idletasks()
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
-    def download_app(self, app_data):
-        """Handle the download and activation process for a book."""
-        try:
-            url = app_data["downloadurl"]
-            unlock_key = app_data["unlockkey"]
-            print(f"[LOG] Starting download process for: {app_data['name']}")
-            print(f"[LOG] Publisher: {app_data['publisher']}")
-            print(f"[LOG] Category: {app_data['category']}")
-            
-            # Handle site:// URLs
-            if url.startswith("site://"):
-                actual_url = url[7:]
-                print(f"[LOG] Opening browser URL: {actual_url}")
-                webbrowser.open(actual_url)
-                return
-            
-            # Handle activation key
-            if unlock_key.lower() != "none":
-                pyperclip.copy(unlock_key)
-                print(f"[LOG] Copied activation key to clipboard: {unlock_key}")
-            
-            # Download process
-            print(f"[LOG] Downloading from URL: {url}")
-            response = requests.get(url, stream=True)
-            
-            if response.status_code == 200:
-                # Prepare filename
-                original_filename = url.split('/')[-1]
-                base_name, extension = os.path.splitext(original_filename)
-                new_filename = f"{base_name}_{unlock_key}{extension}" if unlock_key.lower() != "none" else original_filename
-                filename = os.path.join(self.download_folder, new_filename)
-                
-                print(f"[LOG] Saving file as: {filename}")
-                
-                # Download with progress tracking
-                total_size = int(response.headers.get('content-length', 0))
-                block_size = 8192
-                downloaded = 0
-                
-                with open(filename, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=block_size):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            print(f"[LOG] Download progress: {downloaded}/{total_size} bytes")
-                
-                print("[LOG] Download completed successfully")
-                
-                # Open the file
-                print(f"[LOG] Attempting to open file: {filename}")
-                try:
-                    os.startfile(filename)
-                except Exception as e:
-                    print(f"[LOG] Could not open file directly: {e}")
-                    print(f"[LOG] Opening containing folder instead")
-                os.startfile(self.download_folder)
-            else:
-                error_msg = f"Download failed with status code: {response.status_code}"
-                print(f"[LOG] ERROR: {error_msg}")
-                messagebox.showerror("Error", error_msg)
-            
-        except Exception as e:
-            error_msg = f"An error occurred while downloading: {e}"
-            print(f"[LOG] EXCEPTION: {error_msg}")
-            messagebox.showerror("Error", error_msg)
-
-    def load_data(self):
-        try:
-            print("[LOG] Starting data load")
-            with open(self.data_file, "r", newline="", encoding="utf-8") as file:
-                reader = csv.DictReader(file)
-                self.data = list(reader)
-                print(f"[LOG] Loaded {len(self.data)} items from data file")
-                
-                print("[LOG] Displaying books")
-                self.display_books()
+            return send_from_directory(STATIC_FOLDER, filename)
         except FileNotFoundError:
-            error_msg = f"Data file '{self.data_file}' not found"
-            print(f"[LOG] ERROR: {error_msg}")
-            messagebox.showerror("Error", error_msg)
-        except Exception as e:
-            error_msg = f"An error occurred while loading data: {e}"
-            print(f"[LOG] EXCEPTION: {error_msg}")
-            messagebox.showerror("Error", error_msg)
+            abort(404)
+    else:
+        abort(404)
 
-    def check_data_file(self):
-        """Check if data.csv exists, download it if not, or compare with GitHub version if it exists"""
+# --- Protected Download Route ---
+@app.route('/download-and-run')
+def download_and_run():
+    """Downloads and runs file on server, requires login."""
+    if not session.get('logged_in'):
+        # You could redirect to login, but returning an error is clearer for API-like calls
+        return jsonify({"status": "error", "error": "Authentication required"}), 401 
+
+    # --- If logged in, proceed with download/run logic ---
+    download_url = request.args.get('url')
+    unlock_key = request.args.get('key', 'none')
+    if not download_url: return jsonify({"status": "error", "error": "Missing download URL"}), 400
+    print(f"[LOG] Received download/run request for URL: {download_url}")
+    print(f"[LOG] Associated Unlock Key: {unlock_key}")
+    try:
+        print(f"[LOG] Downloading from URL to server: {download_url}")
+        response = requests.get(download_url, stream=True, timeout=30)
+        response.raise_for_status()
+        # --- Prepare filename ---
         try:
-            print("[LOG] Checking data file")
-            
-            # Check if local file exists first
-            if not os.path.exists(self.data_file):
-                print("[LOG] Data file not found locally")
-                try:
-                    # Add timeout to prevent hanging indefinitely
-                    print("[LOG] Attempting to download from GitHub with timeout")
-                    response = requests.get(self.github_data_url, timeout=10)
-                    
-                    if response.status_code == 200:
-                        with open(self.data_file, "w", encoding="utf-8") as file:
-                            file.write(response.text)
-                        print("[LOG] Data file successfully downloaded")
-                    else:
-                        print(f"[LOG] Failed to download: HTTP {response.status_code}")
-                        messagebox.showerror("Error", f"Failed to download data file: {response.status_code}")
-                        # Create empty data file to prevent future hanging
-                        with open(self.data_file, "w", encoding="utf-8") as file:
-                            file.write("name,downloadurl,unlockkey,category,publisher,coverimageurl\n")
-                except requests.exceptions.Timeout:
-                    print("[LOG] GitHub request timed out")
-                    messagebox.showerror("Error", "Connection to GitHub timed out. Using local data if available.")
-                    # Create empty data file to prevent future hanging
-                    with open(self.data_file, "w", encoding="utf-8") as file:
-                        file.write("name,downloadurl,unlockkey,category,publisher,coverimageurl\n")
-                except Exception as e:
-                    print(f"[LOG] Exception during download: {e}")
-                    messagebox.showerror("Error", f"Error downloading data: {e}")
-                    # Create empty data file to prevent future hanging
-                    with open(self.data_file, "w", encoding="utf-8") as file:
-                        file.write("name,downloadurl,unlockkey,category,publisher,coverimageurl\n")
-            else:
-                print("[LOG] Data file exists locally, checking for updates")
-                try:
-                    # Add timeout to prevent hanging indefinitely
-                    response = requests.get(self.github_data_url, timeout=10)
-                    
-                    if response.status_code == 200:
-                        github_content = response.text
-                        
-                        with open(self.data_file, "r", encoding="utf-8") as file:
-                            local_content = file.read()
-                        
-                        # Compare the files
-                        if local_content != github_content:
-                            print("[LOG] Local data file differs from GitHub version")
-                            if messagebox.askyesno("Update Available", 
-                                                  "A new version of the data file is available on GitHub. Would you like to update?"):
-                                with open(self.data_file, "w", encoding="utf-8") as file:
-                                    file.write(github_content)
-                                print("[LOG] Data file updated from GitHub")
-                        else:
-                            print("[LOG] Data file is up to date")
-                    else:
-                        print(f"[LOG] Failed to check for updates: HTTP {response.status_code}")
-                except requests.exceptions.Timeout:
-                    print("[LOG] GitHub request timed out")
-                except Exception as e:
-                    print(f"[LOG] Exception checking for updates: {e}")
+            content_disposition = response.headers.get('content-disposition')
+            if content_disposition:
+                 import cgi; value, params = cgi.parse_header(content_disposition)
+                 original_filename = params.get('filename')
+            else original_filename = None
+            if not original_filename:
+                parsed_url = urllib.parse.urlparse(download_url)
+                original_filename = os.path.basename(parsed_url.path) if parsed_url.path else "downloaded_file"
         except Exception as e:
-            error_msg = f"An error occurred in check_data_file: {e}"
-            print(f"[LOG] CRITICAL ERROR: {error_msg}")
-            messagebox.showerror("Error", error_msg)
+             print(f"[WARN] Could not reliably determine filename: {e}")
+             original_filename = "downloaded_file"
+        # --- Sanitize & Create Path ---
+        base_name, extension = os.path.splitext(original_filename)
+        safe_base_name = "".join(c for c in base_name if c.isalnum() or c in ('_', '-', '.'))[:100]
+        safe_extension = "".join(c for c in extension if c.isalnum() or c == '.')[:10]
+        new_filename_base = f"{safe_base_name}_{unlock_key}" if unlock_key.lower() != "none" else safe_base_name
+        filename = f"{new_filename_base}{safe_extension}"
+        filepath = os.path.join(DOWNLOAD_FOLDER, filename)
+        print(f"[LOG] Saving file to server path: {filepath}")
+        # --- Save File ---
+        with open(filepath, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk: f.write(chunk)
+        print("[LOG] Server download completed successfully.")
+        # --- Execute File ---
+        print(f"[LOG] Attempting to launch file on server: {filepath}")
+        try:
+            os.startfile(filepath)
+            print(f"[LOG] Successfully launched {filepath} on server.")
+            return jsonify({"status": "success", "message": f"'{filename}' downloaded and launched on server."})
+        except FileNotFoundError:
+             print(f"[ERROR] File not found after download? Path: {filepath}")
+             return jsonify({"status": "error", "error": f"File not found at path: {filepath}"}), 500
+        except Exception as e:
+            print(f"[ERROR] Could not launch file '{filepath}' on server: {e}")
+            return jsonify({"status": "error", "error": f"Could not launch file: {e}"}), 500
+    # --- Error Handling for Download ---
+    except requests.exceptions.Timeout:
+        print(f"[ERROR] Timeout downloading {download_url}")
+        return jsonify({"status": "error", "error": "Download timed out"}), 504
+    except requests.exceptions.RequestException as e:
+        print(f"[ERROR] Failed to download {download_url}: {e}")
+        return jsonify({"status": "error", "error": f"Download failed: {e}"}), 502
+    except Exception as e:
+        print(f"[ERROR] An unexpected error occurred during download/run: {e}")
+        return jsonify({"status": "error", "error": f"Unexpected server error: {e}"}), 500
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = AppDownloader(root)
-    root.mainloop()
+# --- Run the App ---
+if __name__ == '__main__':
+    # Keep localhost restriction AND add password layer
+    app.run(debug=True, port=5000) # No host='0.0.0.0'
