@@ -123,6 +123,10 @@ class AppDownloader:
 
     def get_cached_image(self, url, size=(180, 250), max_retries=3):
         """Get image from cache or download and cache it with retry mechanism."""
+        if not url:
+            # Pass size but not url to placeholder creation when url is empty
+            return self.create_placeholder_image(size=size) 
+            
         # Create hash of URL for filename
         url_hash = hashlib.md5(url.encode()).hexdigest()
         cache_path = os.path.join(self.assets_folder, f"{url_hash}.png")
@@ -144,22 +148,17 @@ class AppDownloader:
                     return photo_img
                 except Exception as e:
                     print(f"[LOG] Error loading cached image, will try downloading again: {e}")
-                    # If cached image is corrupted, continue to download
             
             # If not in cache, try downloading with retries
             for attempt in range(max_retries):
                 try:
                     print(f"[LOG] Downloading image (attempt {attempt + 1}/{max_retries}): {url}")
                     response = requests.get(url, timeout=10)
-                    response.raise_for_status()  # Raise an error for bad status codes
+                    response.raise_for_status()
                     
                     img_data = response.content
                     img = Image.open(io.BytesIO(img_data))
-                    
-                    # Convert to RGBA to ensure compatibility
                     img = img.convert('RGBA')
-                    
-                    # Resize image
                     img = img.resize(size, Image.Resampling.LANCZOS)
                     
                     # Save to cache
@@ -173,15 +172,22 @@ class AppDownloader:
                     
                 except requests.exceptions.RequestException as e:
                     print(f"[LOG] Download attempt {attempt + 1} failed: {e}")
-                    if attempt == max_retries - 1:  # Last attempt
-                        raise  # Re-raise the exception if all retries failed
+                    if attempt == max_retries - 1:
+                        raise
+            
+            # If download loop finishes without returning/raising, create placeholder
+            print(f"[LOG] Failed to download image after {max_retries} attempts for: {url}")
+            return self.create_placeholder_image(size=size) # Pass size only
             
         except Exception as e:
             print(f"[LOG] ERROR loading image from {url}: {e}")
-            return self.create_placeholder_image(size, url)
+            # Pass size only in final exception handler
+            return self.create_placeholder_image(size=size) 
 
     def create_placeholder_image(self, size=(180, 250), url=None):
         """Create a placeholder image with error text."""
+        # The url parameter is kept here for potential future use or debugging, 
+        # but we don't strictly need it based on the calls above.
         try:
             print(f"[LOG] Creating placeholder image for: {url}")
             # Create a new image with a dark background
@@ -224,29 +230,32 @@ class AppDownloader:
                 self.images[url] = photo_img
             return photo_img
 
-    def create_book_widget(self, parent, app_data, row, col):
+    def create_book_widget(self, parent, app_data, row, col, i):
         """Create a widget for a single book."""
         # Book frame
         frame = ttk.Frame(parent, style='Dark.TFrame')
         frame.grid(row=row, column=col, padx=5, pady=5)
         
         # Load cover image with loading indicator
-        loading_placeholder = self.create_placeholder_image(size=(150, 200))
+        placeholder_size = (150, 200) 
+        loading_placeholder = self.create_placeholder_image(size=placeholder_size)
         cover_label = tk.Label(frame, image=loading_placeholder, bg="#1E1E1E")
         cover_label.pack()
         
         # Update label with actual image
         def update_image():
             try:
-                cover_image = self.get_cached_image(app_data["coverimageurl"], size=(150, 200))
-                if cover_image:
-                    cover_label.configure(image=cover_image)
-                    cover_label.image = cover_image  # Keep a reference
+                if "coverimageurl" in app_data and app_data["coverimageurl"]:
+                    cover_image = self.get_cached_image(app_data["coverimageurl"], size=placeholder_size) 
+                    if cover_image:
+                        cover_label.configure(image=cover_image)
+                        cover_label.image = cover_image  # Keep a reference
             except Exception as e:
                 print(f"[LOG] Error updating image: {e}")
         
-        # Schedule image loading
-        self.master.after(10, update_image)
+        # Schedule image loading with staggered delay based on index 'i'
+        stagger_delay_ms = 100 + i * 50 # Base 100ms + 50ms per book index
+        self.master.after(stagger_delay_ms, update_image) 
         
         # Book information
         info_frame = ttk.Frame(frame, style='Dark.TFrame')
@@ -280,11 +289,11 @@ class AppDownloader:
         
         download_btn = tk.Button(
             button_frame,
-                               text="İNDİR",
+            text="İNDİR",
             bg="#FF4136",
             fg="white",
-                               font=('Arial', 10, 'bold'),
-                               relief=tk.FLAT,
+            font=('Arial', 10, 'bold'),
+            relief=tk.FLAT,
             command=lambda: self.download_app(app_data)
         )
         download_btn.pack(fill=tk.X)
@@ -345,34 +354,21 @@ class AppDownloader:
                 books_frame = ttk.Frame(books_canvas, style='Dark.TFrame')
                 canvas_window = books_canvas.create_window((0, 0), window=books_frame, anchor="nw")
                 
-                # Configure books frame to expand horizontally
-                def on_frame_configure(event):
-                    # Update the scrollregion to encompass the inner frame
+                # Configure books frame to update scrollregion when its size changes
+                def on_books_frame_configure(event):
                     books_canvas.configure(scrollregion=books_canvas.bbox("all"))
-                    # Calculate total width needed for all books
-                    total_width = len(categories[category]) * 200  # Assuming each book needs ~200px width
-                    books_frame.configure(width=max(total_width, event.width))
                 
-                books_frame.bind('<Configure>', on_frame_configure)
+                books_frame.bind('<Configure>', on_books_frame_configure)
                 
-                # Make sure the canvas window spans the full width
-                def configure_canvas_window(event):
-                    # Get the total width needed for all books
-                    total_width = len(categories[category]) * 200  # Assuming each book needs ~200px width
-                    # Use the larger of the window width or total books width
-                    width = max(event.width, total_width)
-                    books_canvas.itemconfig(canvas_window, width=width)
-                    books_frame.configure(width=width)
-                
-                books_canvas.bind('<Configure>', configure_canvas_window)
-                
-                # Display books horizontally
+                # Display books horizontally, passing the index 'i'
                 for i, book in enumerate(categories[category]):
                     print(f"[LOG] Adding book {book['name']} to category {category}")
-                    self.create_book_widget(books_frame, book, 0, i)
+                    # Pass index 'i' to the widget creation function
+                    self.create_book_widget(books_frame, book, 0, i, i) 
                 
-                # Update canvas scroll region after adding books
-                books_frame.update_idletasks()
+                # Update canvas scroll region initially after adding books
+                # This might be redundant due to the binding, but can help ensure initial state
+                books_frame.update_idletasks() 
                 books_canvas.configure(scrollregion=books_canvas.bbox("all"))
                 
                 # Category number below books
@@ -541,13 +537,10 @@ class AppDownloader:
                             print("[LOG] Data file is up to date")
                     else:
                         print(f"[LOG] Failed to check for updates: HTTP {response.status_code}")
-                        messagebox.showwarning("Warning", "Failed to check for data file updates. Using existing data.")
                 except requests.exceptions.Timeout:
                     print("[LOG] GitHub request timed out")
-                    messagebox.showwarning("Warning", "Connection to GitHub timed out. Using existing data.")
                 except Exception as e:
                     print(f"[LOG] Exception checking for updates: {e}")
-                    messagebox.showwarning("Warning", f"Error checking for updates: {e}. Using existing data.")
         except Exception as e:
             error_msg = f"An error occurred in check_data_file: {e}"
             print(f"[LOG] CRITICAL ERROR: {error_msg}")
