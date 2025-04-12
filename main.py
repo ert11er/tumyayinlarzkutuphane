@@ -175,7 +175,6 @@ class AppDownloader:
                     print(f"[LOG] Download attempt {attempt + 1} failed: {e}")
                     if attempt == max_retries - 1:  # Last attempt
                         raise  # Re-raise the exception if all retries failed
-                    continue
             
         except Exception as e:
             print(f"[LOG] ERROR loading image from {url}: {e}")
@@ -326,14 +325,55 @@ class AppDownloader:
             if categories[category]:
                 print(f"[LOG] Creating section for category: {category}")
                 
-                # Books container for this category
-                books_frame = ttk.Frame(self.content_frame, style='Dark.TFrame')
-                books_frame.grid(row=row, column=0, sticky='ew', padx=20)
+                # Create a frame for the category
+                category_container = ttk.Frame(self.content_frame, style='Dark.TFrame')
+                category_container.grid(row=row, column=0, sticky='ew', padx=20)
+                category_container.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
+                
+                # Create a canvas for horizontal scrolling
+                books_canvas = tk.Canvas(category_container, bg='#1E1E1E', highlightthickness=0, height=350)  # Set fixed height
+                books_canvas.pack(side=tk.TOP, fill=tk.X, expand=True)
+                
+                # Create horizontal scrollbar
+                h_scrollbar = ttk.Scrollbar(category_container, orient=tk.HORIZONTAL, command=books_canvas.xview)
+                h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+                
+                # Configure canvas
+                books_canvas.configure(xscrollcommand=h_scrollbar.set)
+                
+                # Create frame for books inside canvas
+                books_frame = ttk.Frame(books_canvas, style='Dark.TFrame')
+                canvas_window = books_canvas.create_window((0, 0), window=books_frame, anchor="nw")
+                
+                # Configure books frame to expand horizontally
+                def on_frame_configure(event):
+                    # Update the scrollregion to encompass the inner frame
+                    books_canvas.configure(scrollregion=books_canvas.bbox("all"))
+                    # Calculate total width needed for all books
+                    total_width = len(categories[category]) * 200  # Assuming each book needs ~200px width
+                    books_frame.configure(width=max(total_width, event.width))
+                
+                books_frame.bind('<Configure>', on_frame_configure)
+                
+                # Make sure the canvas window spans the full width
+                def configure_canvas_window(event):
+                    # Get the total width needed for all books
+                    total_width = len(categories[category]) * 200  # Assuming each book needs ~200px width
+                    # Use the larger of the window width or total books width
+                    width = max(event.width, total_width)
+                    books_canvas.itemconfig(canvas_window, width=width)
+                    books_frame.configure(width=width)
+                
+                books_canvas.bind('<Configure>', configure_canvas_window)
                 
                 # Display books horizontally
                 for i, book in enumerate(categories[category]):
                     print(f"[LOG] Adding book {book['name']} to category {category}")
                     self.create_book_widget(books_frame, book, 0, i)
+                
+                # Update canvas scroll region after adding books
+                books_frame.update_idletasks()
+                books_canvas.configure(scrollregion=books_canvas.bbox("all"))
                 
                 # Category number below books
                 category_frame = ttk.Frame(self.content_frame, style='Dark.TFrame')
